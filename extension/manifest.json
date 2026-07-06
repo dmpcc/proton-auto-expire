@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Proton Auto-Expire",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "One-click 'auto-delete mail from this sender after N days' for Proton Mail sieve filters.",
   "content_scripts": [
     {

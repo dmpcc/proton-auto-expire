@@ -20,7 +20,10 @@
   'use strict';
 
   const FILTER_VERSION = 2; // FILTER_VERSION in Proton's client code
+  // Unanchored: used to find an address inside larger text (sender detection).
   const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
+  // Anchored: the typed input must be exactly one address, nothing around it.
+  const EMAIL_EXACT_RE = new RegExp(`^${EMAIL_RE.source}$`);
 
   // ---------------------------------------------------------------------
   // Auth headers, captured from the page by inject.js
@@ -291,8 +294,8 @@
 
   async function onAdd(filter, parsed) {
     const addr = addressInput.value.trim().toLowerCase();
-    if (!EMAIL_RE.test(addr)) {
-      setStatus('Vul eerst een geldig e-mailadres in.', 'warn');
+    if (!EMAIL_EXACT_RE.test(addr)) {
+      setStatus('Vul eerst een geldig e-mailadres in (alleen het adres zelf).', 'warn');
       return;
     }
     if (parsed.addresses.includes(addr)) {
@@ -315,8 +318,8 @@
 
   async function onCreateFilter() {
     const addr = addressInput.value.trim().toLowerCase();
-    if (!EMAIL_RE.test(addr)) {
-      setStatus('Vul eerst een e-mailadres in; het nieuwe filter start daarmee.', 'warn');
+    if (!EMAIL_EXACT_RE.test(addr)) {
+      setStatus('Vul eerst een e-mailadres in (alleen het adres zelf); het nieuwe filter start daarmee.', 'warn');
       return;
     }
     const daysStr = prompt('Na hoeveel dagen definitief verwijderen?', '14');
