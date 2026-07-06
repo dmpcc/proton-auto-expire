@@ -33,6 +33,29 @@
   const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
   // Anchored: the typed input must be exactly one address, nothing around it.
   const EMAIL_EXACT_RE = new RegExp(`^${EMAIL_RE.source}$`);
+  // A bare (sub)domain such as "mail.anthropic.com".
+  const DOMAIN_RE = /^[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*\.[a-zA-Z]{2,}$/;
+
+  // Turn typed input into a sieve list entry: a full address stays as-is,
+  // a domain ("@site.nl", "site.nl" or "*@site.nl") becomes the wildcard
+  // pattern "*@site.nl". Returns null when the input is neither.
+  function normalizeEntry(raw) {
+    const s = (raw || '').trim().toLowerCase();
+    if (!s) return null;
+    if (EMAIL_EXACT_RE.test(s)) return s;
+    let domain = s;
+    if (domain.startsWith('*@')) domain = domain.slice(2);
+    else if (domain.startsWith('@')) domain = domain.slice(1);
+    if (DOMAIN_RE.test(domain)) return `*@${domain}`;
+    return null;
+  }
+
+  // Does a sieve list entry (address or "*@domain" pattern) match an address?
+  function entryMatchesAddress(entry, address) {
+    if (!address) return false;
+    if (entry.startsWith('*@')) return address.endsWith(entry.slice(1));
+    return address === entry;
+  }
 
   // ---------------------------------------------------------------------
   // Auth headers, captured from the page by inject.js
@@ -92,19 +115,25 @@
   const createFilter = (Name, Sieve) =>
     api('POST', '/api/mail/v4/filters', { Name, Sieve, Version: FILTER_VERSION });
 
-  // List IDs of all existing messages from one sender (paginated).
-  async function listMessagesFrom(addr) {
+  // List IDs of all existing messages matching a sieve entry (an address or
+  // a "*@domain" pattern). Proton's From search matches loosely, so the
+  // results are filtered client-side against the actual sender address.
+  async function listMessagesFrom(entry) {
+    const searchTerm = entry.startsWith('*@') ? entry.slice(2) : entry;
     const ids = [];
     for (let page = 0; page < MAX_MESSAGE_PAGES; page++) {
       const q = new URLSearchParams({
-        From: addr,
+        From: searchTerm,
         LabelID: ALL_MAIL_LABEL_ID,
         Page: String(page),
         PageSize: String(MESSAGES_PAGE_SIZE),
       });
       const res = await api('GET', `/api/mail/v4/messages?${q}`);
       const msgs = res.Messages || [];
-      ids.push(...msgs.map((m) => m.ID));
+      for (const m of msgs) {
+        const sender = ((m.Sender && m.Sender.Address) || '').toLowerCase();
+        if (entryMatchesAddress(entry, sender)) ids.push(m.ID);
+      }
       if (msgs.length < MESSAGES_PAGE_SIZE) break;
     }
     return ids;
@@ -125,7 +154,7 @@
   // ---------------------------------------------------------------------
   // Sieve parsing / editing
   // ---------------------------------------------------------------------
-  const LIST_RE = /(if\s+address\s+:is\s+"from"\s+\[)([\s\S]*?)(\])/;
+  const LIST_RE = /(if\s+address\s+:(?:is|matches)\s+"from"\s+\[)([\s\S]*?)(\])/;
   const DAYS_RE = /expire\s+"day"\s+"(\d+)"/;
 
   function parseExpireSieve(sieve) {
@@ -139,14 +168,17 @@
 
   function sieveWithAddresses(sieve, addresses) {
     const inner = '\n' + addresses.map((a) => `"${a}"`).join(',\n') + '\n';
-    return sieve.replace(LIST_RE, (_, open, __, close) => open + inner + close);
+    // Always write ":matches" so wildcard entries like "*@example.com" work;
+    // for plain addresses ":matches" behaves exactly like ":is".
+    return sieve.replace(LIST_RE, (_, open, __, close) =>
+      open.replace(/:is\b/, ':matches') + inner + close);
   }
 
   function newExpireSieve(address, days) {
     return [
       'require ["vnd.proton.expire"];',
       `# Managed by Proton Auto-Expire — permanently delete after ${days} days.`,
-      'if address :is "from" [',
+      'if address :matches "from" [',
       `"${address}"`,
       ']',
       '{',
@@ -352,8 +384,8 @@
 
   async function onExpireOne(addr, days) {
     if (busy) return;
-    if (detectSender() !== addr) {
-      setStatus('De geopende mail is niet (meer) van dit adres — open die mail en probeer opnieuw.', 'warn');
+    if (!entryMatchesAddress(addr, detectSender())) {
+      setStatus('De geopende mail hoort niet (meer) bij deze vermelding — open die mail en probeer opnieuw.', 'warn');
       return;
     }
     const id = detectOpenMessageId();
@@ -429,9 +461,9 @@
   // Reflect in each row whether the current address is already in that filter:
   // the action button flips between "Voeg toe" and "Verwijder".
   function updateMembership() {
-    const addr = addressInput.value.trim().toLowerCase();
+    const entry = normalizeEntry(addressInput.value);
     for (const { parsed, actionBtn } of rows) {
-      const present = parsed.addresses.includes(addr);
+      const present = entry != null && parsed.addresses.includes(entry);
       actionBtn.textContent = present ? 'Verwijder' : 'Voeg toe';
       actionBtn.classList.toggle('pae-del', present);
       actionBtn.classList.toggle('pae-add', !present);
@@ -455,9 +487,9 @@
     // address in the input field is already in this filter's list.
     const actionBtn = el('button', 'pae-btn pae-add', 'Voeg toe');
     actionBtn.addEventListener('click', () => {
-      const addr = addressInput.value.trim().toLowerCase();
-      if (parsed.addresses.includes(addr)) {
-        onRemove(filter, parsed, addr);
+      const entry = normalizeEntry(addressInput.value);
+      if (entry && parsed.addresses.includes(entry)) {
+        onRemove(filter, parsed, entry);
       } else {
         onAdd(filter, parsed);
       }
@@ -501,19 +533,19 @@
   }
 
   async function onAdd(filter, parsed) {
-    const addr = addressInput.value.trim().toLowerCase();
-    if (!EMAIL_EXACT_RE.test(addr)) {
-      setStatus('Vul eerst een geldig e-mailadres in (alleen het adres zelf).', 'warn');
+    const entry = normalizeEntry(addressInput.value);
+    if (!entry) {
+      setStatus('Vul eerst een geldig e-mailadres of domein in (bijv. naam@site.nl of @site.nl).', 'warn');
       return;
     }
-    if (parsed.addresses.includes(addr)) {
-      setStatus(`${addr} staat al in "${filter.Name}".`, 'warn');
+    if (parsed.addresses.includes(entry)) {
+      setStatus(`${entry} staat al in "${filter.Name}".`, 'warn');
       return;
     }
-    const newSieve = sieveWithAddresses(filter.Sieve, [...parsed.addresses, addr]);
-    const saved = await saveSieve(filter, newSieve, `${addr} → verwijderen na ${parsed.days} dagen ✔`);
+    const newSieve = sieveWithAddresses(filter.Sieve, [...parsed.addresses, entry]);
+    const saved = await saveSieve(filter, newSieve, `${entry} → verwijderen na ${parsed.days} dagen ✔`);
     // The filter only affects incoming mail; offer to expire existing mail too.
-    if (saved) showExpireOffer(addr, parsed.days);
+    if (saved) showExpireOffer(entry, parsed.days);
   }
 
   async function onRemove(filter, parsed, addr) {
@@ -527,9 +559,9 @@
   }
 
   async function onCreateFilter() {
-    const addr = addressInput.value.trim().toLowerCase();
-    if (!EMAIL_EXACT_RE.test(addr)) {
-      setStatus('Vul eerst een e-mailadres in (alleen het adres zelf); het nieuwe filter start daarmee.', 'warn');
+    const addr = normalizeEntry(addressInput.value);
+    if (!addr) {
+      setStatus('Vul eerst een e-mailadres of domein in; het nieuwe filter start daarmee.', 'warn');
       return;
     }
     const daysStr = prompt('Na hoeveel dagen definitief verwijderen?', '14');

@@ -17,7 +17,7 @@ Na een code-wijziging: herlaadknop bij de extensie op `vivaldi://extensions`, da
 ## Gebruik
 
 1. Open een mail in Proton Mail.
-2. Klik op de ⏳-knop rechtsonder → de zijbalk opent en vult de afzender automatisch in (of typ/plak zelf een adres).
+2. Klik op de ⏳-knop rechtsonder → de zijbalk opent en vult de afzender automatisch in. Je kunt ook zelf iets typen of plakken: een volledig adres, of een domein zoals `@mail.anthropic.com` (met of zonder `@`). Een domein wordt opgeslagen als patroon `*@mail.anthropic.com` en matcht alle afzenders op precies dat domein — subdomeinen zoals `news.anthropic.com` vallen er niet onder; voeg die apart toe.
 3. Klik **Voeg toe** bij het gewenste filter (3 / 7 / 14 / 60 dagen — de extensie herkent automatisch alle filters die `vnd.proton.expire` + een `from`-adreslijst bevatten).
    Na het toevoegen vraagt het paneel of ook **bestaande** mail van dat adres moet vervallen: alleen het geopende bericht, alle mail van die afzender, of niets. De termijn telt vanaf dat moment (zelfde mechanisme als Protons "self-destruct"); de berichten worden dan definitief verwijderd, niet naar de prullenbak verplaatst.
 4. Staat het adres al in een filter, dan toont die rij een rode **Verwijder**-knop; één klik haalt het adres er weer uit. Zo zie je meteen in welke filters het huidige adres zit.
@@ -43,6 +43,6 @@ Elke wijziging wordt eerst gevalideerd via Protons eigen sieve-check-endpoint vo
 
 - **Onofficiële API.** Proton documenteert deze API niet voor derden en kan hem zonder aankondiging wijzigen. Werkt het opeens niet meer: check in DevTools (Network-tab op mail.proton.me → Filters-pagina) of de paden/velden nog kloppen.
 - **Afzenderdetectie is DOM-gebaseerd** en kan breken bij een UI-update van Proton. Er zijn meerdere fallback-selectors plus een handmatig invoerveld, dus je kunt altijd verder.
-- **Sieve-parsing verwacht jouw template**: één `if address :is "from" [ ... ]`-blok per filter. Complexere sieve-scripts (meerdere blokken, `anyof`, etc.) worden overgeslagen of alleen het eerste blok wordt bewerkt.
+- **Sieve-parsing verwacht jouw template**: één `if address :is/:matches "from" [ ... ]`-blok per filter. Complexere sieve-scripts (meerdere blokken, `anyof`, etc.) worden overgeslagen of alleen het eerste blok wordt bewerkt. Bij de eerste wijziging zet de extensie een filter om van `:is` naar `:matches` (nodig voor domeinpatronen; voor gewone adressen gedraagt dat zich identiek).
 - De extensie werkt op `mail.proton.me`; de filterpagina op `account.proton.me` heeft hem niet nodig maar toont wijzigingen pas na een refresh.
 - Getest is de logica (sieve-parsing/-herschrijven) lokaal; de API-calls zelf kon ik hier niet live tegen jouw account testen. Eerste keer: probeer het met één testadres en controleer daarna in Instellingen → Filters of de sieve klopt.

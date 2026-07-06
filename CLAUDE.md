@@ -18,7 +18,7 @@ Chromium-browserextensie (MV3, geladen als "unpacked" in Vivaldi) die een zijbal
 
 1. **De API is onofficieel.** Endpoints (`GET/PUT/POST /api/mail/v4/filters`, `PUT /api/mail/v4/filters/check`, `GET /api/mail/v4/messages`, `PUT /api/mail/v4/messages/expire`) en `FILTER_VERSION = 2` komen uit Protons open-source webclient. Proton kan dit zonder aankondiging wijzigen.
 2. **Auth werkt via same-origin + opgevangen headers.** Geen tokens opslaan; de httpOnly sessie-cookie gaat automatisch mee. `inject.js` niet vervangen door hardcoded appversion-strings — die verouderen.
-3. **Sieve-parsing verwacht een specifiek template**: precies één `if address :is "from" [ ... ]`-blok met een `expire "day" "N"`-actie. Regexes staan in `content.js` (`LIST_RE`, `DAYS_RE`). Complexere sieves worden bewust overgeslagen.
+3. **Sieve-parsing verwacht een specifiek template**: precies één `if address :is/:matches "from" [ ... ]`-blok met een `expire "day" "N"`-actie. Regexes staan in `content.js` (`LIST_RE`, `DAYS_RE`). Complexere sieves worden bewust overgeslagen. Bij het wegschrijven wordt `:is` altijd omgezet naar `:matches`, zodat domeinpatronen (`*@site.nl`) werken; voor exacte adressen is het gedrag gelijk.
 4. **Afzenderdetectie is DOM-gebaseerd** (`detectSender()` in `content.js`) met meerdere fallback-selectors en handmatige invoer als vangnet. Selectors zijn nooit live geverifieerd tegen Protons huidige DOM; dit is het meest waarschijnlijke breekpunt.
 
 ## Onderhoudsplaybook
