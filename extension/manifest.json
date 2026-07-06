@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Proton Auto-Expire",
+  "version": "0.1.0",
+  "description": "One-click 'auto-delete mail from this sender after N days' for Proton Mail sieve filters.",
+  "content_scripts": [
+    {
+      "matches": ["https://mail.proton.me/*"],
+      "js": ["inject.js"],
+      "world": "MAIN",
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://mail.proton.me/*"],
+      "js": ["content.js"],
+      "css": ["style.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

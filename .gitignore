@@ -1,0 +1,4 @@
+# Nothing to ignore yet; extension is plain JS with no build output.
+.claude/settings.local.json
+*.zip
+.DS_Store
