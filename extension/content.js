@@ -121,25 +121,30 @@
   // Sender detection (DOM — selectors may break when Proton updates its UI)
   // ---------------------------------------------------------------------
   function detectSender() {
-    const selectors = [
-      '[data-testid="message-column:sender-address"]',
-      '[data-testid="message:sender-address"]',
-      '[data-testid="recipients:sender-address"]',
-      '.message-recipient-item-address',
-    ];
-    for (const sel of selectors) {
-      const el = document.querySelector(sel);
-      if (el) {
-        const m = (el.getAttribute('title') || el.textContent || '').match(EMAIL_RE);
-        if (m) return m[0].toLowerCase();
-      }
+    // The opened message's sender carries data-testid="recipients:sender"
+    // (set in HeaderExpanded.tsx upstream) with the address in its title.
+    // Do NOT use "message-column:sender-address": that testid lives on rows
+    // in the message LIST, so it returns the wrong mail's sender.
+    // In a conversation several messages can be expanded; the last expanded
+    // header belongs to the most recently opened message, so take the last.
+    const senders = document.querySelectorAll('[data-testid="recipients:sender"]');
+    if (senders.length) {
+      const el = senders[senders.length - 1];
+      const m = (el.getAttribute('title') || el.textContent || '').match(EMAIL_RE);
+      if (m) return m[0].toLowerCase();
     }
-    // Fallback: scan the expanded message header for anything email-shaped.
-    const header = document.querySelector(
-      '[data-shortcut-target="message-header-expanded"], .message-header'
+    // Fallback: scan the last expanded message header for anything email-shaped.
+    const headers = document.querySelectorAll(
+      '.message-header-expanded, [data-shortcut-target="message-header-expanded"]'
     );
-    if (header) {
-      const m = (header.textContent || '').match(EMAIL_RE);
+    if (headers.length) {
+      const header = headers[headers.length - 1];
+      const addr = header.querySelector(
+        '[data-testid="recipient-address"], .message-recipient-item-address'
+      );
+      const text = (addr && (addr.getAttribute('title') || addr.textContent)) ||
+        header.textContent || '';
+      const m = text.match(EMAIL_RE);
       if (m) return m[0].toLowerCase();
     }
     return null;
@@ -207,7 +212,10 @@
       addressInput.value = s;
       setStatus('');
     } else {
-      setStatus('Geen afzender gevonden — open een mail of typ het adres zelf.', 'warn');
+      // Clear the field so a stale address from a previous mail can never
+      // be added by accident.
+      addressInput.value = '';
+      setStatus('Geen afzender gevonden in de geopende mail — typ of plak het adres zelf.', 'warn');
     }
   }
 
