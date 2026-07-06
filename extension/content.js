@@ -10,6 +10,8 @@
  *   PUT  /api/mail/v4/filters/check      (validate sieve)
  *   PUT  /api/mail/v4/filters/{id}       (update)
  *   POST /api/mail/v4/filters            (create)
+ *   GET  /api/mail/v4/messages           (list existing mail from a sender)
+ *   PUT  /api/mail/v4/messages/expire    (self-destruct existing messages)
  *
  * NOTE: this API is not officially documented for third parties. Endpoints
  * were taken from Proton's open-source client (github.com/ProtonMail/WebClients,
@@ -22,6 +24,11 @@
   const FILTER_VERSION = 2; // FILTER_VERSION in Proton's client code
   // How often (ms) to re-check the opened mail while the panel is open.
   const FOLLOW_INTERVAL_MS = 1000;
+  const SECONDS_PER_DAY = 24 * 60 * 60;
+  // Proton's "All mail" system label; used to find existing mail from a sender.
+  const ALL_MAIL_LABEL_ID = '5';
+  const MESSAGES_PAGE_SIZE = 150; // Proton's maximum page size
+  const MAX_MESSAGE_PAGES = 20; // safety cap: at most 3000 messages per action
   // Unanchored: used to find an address inside larger text (sender detection).
   const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
   // Anchored: the typed input must be exactly one address, nothing around it.
@@ -84,6 +91,36 @@
     });
   const createFilter = (Name, Sieve) =>
     api('POST', '/api/mail/v4/filters', { Name, Sieve, Version: FILTER_VERSION });
+
+  // List IDs of all existing messages from one sender (paginated).
+  async function listMessagesFrom(addr) {
+    const ids = [];
+    for (let page = 0; page < MAX_MESSAGE_PAGES; page++) {
+      const q = new URLSearchParams({
+        From: addr,
+        LabelID: ALL_MAIL_LABEL_ID,
+        Page: String(page),
+        PageSize: String(MESSAGES_PAGE_SIZE),
+      });
+      const res = await api('GET', `/api/mail/v4/messages?${q}`);
+      const msgs = res.Messages || [];
+      ids.push(...msgs.map((m) => m.ID));
+      if (msgs.length < MESSAGES_PAGE_SIZE) break;
+    }
+    return ids;
+  }
+
+  // Same mechanism as Proton's own "self-destruct in x days": the messages
+  // are permanently deleted (not trashed) once the timestamp passes.
+  async function expireMessages(ids, days) {
+    const expirationTime = Math.floor(Date.now() / 1000) + days * SECONDS_PER_DAY;
+    for (let i = 0; i < ids.length; i += MESSAGES_PAGE_SIZE) {
+      await api('PUT', '/api/mail/v4/messages/expire', {
+        IDs: ids.slice(i, i + MESSAGES_PAGE_SIZE),
+        ExpirationTime: expirationTime,
+      });
+    }
+  }
 
   // ---------------------------------------------------------------------
   // Sieve parsing / editing
@@ -152,6 +189,17 @@
     return null;
   }
 
+  // ID of the opened message, from the data-message-id attribute on the
+  // message container (MessageView.tsx upstream).
+  function detectOpenMessageId() {
+    const headers = document.querySelectorAll(
+      '.message-header-expanded, [data-shortcut-target="message-header-expanded"]'
+    );
+    if (!headers.length) return null;
+    const container = headers[headers.length - 1].closest('[data-message-id]');
+    return container ? container.getAttribute('data-message-id') : null;
+  }
+
   // ---------------------------------------------------------------------
   // UI
   // ---------------------------------------------------------------------
@@ -169,6 +217,8 @@
   // Last value we auto-filled; lets us tell auto-filled from hand-typed input.
   let lastAutoFill = null;
   let followTimer = null;
+  // Inline "apply to existing mail?" prompt, shown after a successful add.
+  let offerEl = null;
 
   function setStatus(msg, kind = '') {
     statusEl.textContent = msg;
@@ -265,8 +315,85 @@
   }
 
   async function onOpen() {
+    hideOffer();
     fillSender();
     await renderFilters();
+  }
+
+  // -------------------------------------------------------------------
+  // "Apply to existing mail?" prompt
+  // -------------------------------------------------------------------
+  function hideOffer() {
+    if (offerEl) {
+      offerEl.remove();
+      offerEl = null;
+    }
+  }
+
+  function showExpireOffer(addr, days) {
+    hideOffer();
+    offerEl = el('div', 'pae-offer');
+    offerEl.append(
+      el('div', 'pae-offer-text', `Ook bestaande mail van ${addr} laten vervallen over ${days} dagen?`)
+    );
+    const row = el('div', 'pae-offer-row');
+    const oneBtn = el('button', 'pae-btn pae-ghost', 'Dit bericht');
+    oneBtn.title = 'Alleen het geopende bericht';
+    oneBtn.addEventListener('click', () => onExpireOne(addr, days));
+    const allBtn = el('button', 'pae-btn pae-ghost', 'Alle mail');
+    allBtn.title = 'Alle bestaande berichten van dit adres';
+    allBtn.addEventListener('click', () => onExpireAll(addr, days));
+    const noBtn = el('button', 'pae-btn pae-ghost', 'Nee');
+    noBtn.addEventListener('click', hideOffer);
+    row.append(oneBtn, allBtn, noBtn);
+    offerEl.append(row);
+    panel.insertBefore(offerEl, statusEl);
+  }
+
+  async function onExpireOne(addr, days) {
+    if (busy) return;
+    if (detectSender() !== addr) {
+      setStatus('De geopende mail is niet (meer) van dit adres — open die mail en probeer opnieuw.', 'warn');
+      return;
+    }
+    const id = detectOpenMessageId();
+    if (!id) {
+      setStatus('Kon het geopende bericht niet identificeren.', 'err');
+      return;
+    }
+    busy = true;
+    try {
+      setStatus('Vervaldatum instellen…');
+      await expireMessages([id], days);
+      hideOffer();
+      setStatus(`Dit bericht vervalt over ${days} dagen.`, 'ok');
+    } catch (e) {
+      setStatus(e.message, 'err');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function onExpireAll(addr, days) {
+    if (busy) return;
+    busy = true;
+    try {
+      setStatus('Bestaande mail opzoeken…');
+      const ids = await listMessagesFrom(addr);
+      if (!ids.length) {
+        hideOffer();
+        setStatus('Geen bestaande berichten van dit adres gevonden.', 'warn');
+        return;
+      }
+      setStatus(`Vervaldatum instellen op ${ids.length} berichten…`);
+      await expireMessages(ids, days);
+      hideOffer();
+      setStatus(`${ids.length} berichten vervallen over ${days} dagen.`, 'ok');
+    } catch (e) {
+      setStatus(e.message, 'err');
+    } finally {
+      busy = false;
+    }
   }
 
   async function renderFilters() {
@@ -355,7 +482,7 @@
   }
 
   async function saveSieve(filter, newSieve, successMsg) {
-    if (busy) return;
+    if (busy) return false;
     busy = true;
     try {
       setStatus('Valideren…');
@@ -364,8 +491,10 @@
       await updateFilter({ ...filter, Sieve: newSieve });
       setStatus(successMsg, 'ok');
       await renderFilters();
+      return true;
     } catch (e) {
       setStatus(e.message, 'err');
+      return false;
     } finally {
       busy = false;
     }
@@ -382,7 +511,9 @@
       return;
     }
     const newSieve = sieveWithAddresses(filter.Sieve, [...parsed.addresses, addr]);
-    await saveSieve(filter, newSieve, `${addr} → verwijderen na ${parsed.days} dagen ✔`);
+    const saved = await saveSieve(filter, newSieve, `${addr} → verwijderen na ${parsed.days} dagen ✔`);
+    // The filter only affects incoming mail; offer to expire existing mail too.
+    if (saved) showExpireOffer(addr, parsed.days);
   }
 
   async function onRemove(filter, parsed, addr) {

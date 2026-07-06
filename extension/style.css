@@ -201,6 +201,16 @@
 
 .pae-empty { padding: 14px; color: var(--pae-dim); }
 
+/* "Apply to existing mail?" prompt, shown after adding a sender. */
+.pae-offer {
+  padding: 10px 14px;
+  border-top: 1px solid var(--pae-line);
+  background: var(--pae-bg2);
+  font-size: 12px;
+}
+.pae-offer-text { margin-bottom: 8px; }
+.pae-offer-row { display: flex; gap: 8px; }
+
 .pae-status {
   min-height: 20px;
   padding: 8px 14px;

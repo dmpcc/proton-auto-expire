@@ -19,6 +19,7 @@ Na een code-wijziging: herlaadknop bij de extensie op `vivaldi://extensions`, da
 1. Open een mail in Proton Mail.
 2. Klik op de ⏳-knop rechtsonder → de zijbalk opent en vult de afzender automatisch in (of typ/plak zelf een adres).
 3. Klik **Voeg toe** bij het gewenste filter (3 / 7 / 14 / 60 dagen — de extensie herkent automatisch alle filters die `vnd.proton.expire` + een `from`-adreslijst bevatten).
+   Na het toevoegen vraagt het paneel of ook **bestaande** mail van dat adres moet vervallen: alleen het geopende bericht, alle mail van die afzender, of niets. De termijn telt vanaf dat moment (zelfde mechanisme als Protons "self-destruct"); de berichten worden dan definitief verwijderd, niet naar de prullenbak verplaatst.
 4. Staat het adres al in een filter, dan toont die rij een rode **Verwijder**-knop; één klik haalt het adres er weer uit. Zo zie je meteen in welke filters het huidige adres zit.
 5. Klik op de filternaam om de huidige adreslijst uit- of in te klappen; met **×** verwijder je een adres weer.
 6. Zolang de zijbalk openstaat, loopt het adresveld automatisch mee met de mail die je opent. Typ je zelf een adres, dan blijft dat staan totdat je het veld leegmaakt of op **↻ afzender** klikt.
@@ -34,6 +35,8 @@ Elke wijziging wordt eerst gevalideerd via Protons eigen sieve-check-endpoint vo
   - `PUT /api/mail/v4/filters/check` — sieve valideren
   - `PUT /api/mail/v4/filters/{id}` — filter bijwerken
   - `POST /api/mail/v4/filters` — filter aanmaken
+  - `GET /api/mail/v4/messages` — bestaande mail van een afzender opzoeken
+  - `PUT /api/mail/v4/messages/expire` — vervaldatum op bestaande berichten zetten (Protons "self-destruct")
 - Endpoints en `FILTER_VERSION = 2` komen uit Protons open-source clientcode: `github.com/ProtonMail/WebClients`, `packages/shared/lib/api/filters.ts` en `packages/components/containers/filters/constants.ts`.
 
 ## Beperkingen en kanttekeningen (eerlijk)
