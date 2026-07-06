@@ -1,48 +1,55 @@
 # Proton Auto-Expire
 
-Browser-extensie (Chromium / Vivaldi) die een zijbalk toevoegt aan **mail.proton.me** met één-klik: *"Verwijder mail van deze afzender automatisch na N dagen"*.
+Browser extension (Chromium / Vivaldi) that adds a sidebar to **mail.proton.me** with one-click *"auto-delete mail from this sender after N days"*.
 
-De extensie bewerkt je bestaande sieve-filters (zoals je `Delete after 14 days`-filter) via dezelfde interne REST API die de Proton-webclient zelf gebruikt.
+The extension edits your existing sieve expire filters through the same internal REST API the Proton web client itself uses.
 
-## Installatie (Vivaldi / Chrome / Brave)
+## Installation (Vivaldi / Chrome / Brave)
 
-1. Pak de zip uit naar een vaste map (bijv. `~/projects/proton-auto-expire`). De map is een kant-en-klare git-repo met `CLAUDE.md` voor onderhoud via Claude Code.
-2. Ga naar `vivaldi://extensions` (of `chrome://extensions`).
-3. Zet **Developer mode** aan (rechtsboven).
-4. Klik **Load unpacked** en kies de **submap `extension/`** (niet de projectroot).
-5. Herlaad het tabblad met Proton Mail.
+1. Clone or download this repository to a fixed location.
+2. Go to `vivaldi://extensions` (or `chrome://extensions`).
+3. Enable **Developer mode** (top right).
+4. Click **Load unpacked** and select the **`extension/` subdirectory** (not the project root).
+5. Reload the Proton Mail tab.
 
-Na een code-wijziging: herlaadknop bij de extensie op `vivaldi://extensions`, daarna het Proton Mail-tabblad verversen.
+After a code change: click the reload button next to the extension on `vivaldi://extensions`, then refresh the Proton Mail tab.
 
-## Gebruik
+## Usage
 
-1. Open een mail in Proton Mail.
-2. Klik op de ⏳-knop rechtsonder → de zijbalk opent en vult de afzender automatisch in. Je kunt ook zelf iets typen of plakken: een volledig adres, of een domein zoals `@mail.anthropic.com` (met of zonder `@`). Een domein wordt opgeslagen als patroon `*@mail.anthropic.com` en matcht alle afzenders op precies dat domein — subdomeinen zoals `news.anthropic.com` vallen er niet onder; voeg die apart toe.
-3. Klik **Voeg toe** bij het gewenste filter (3 / 7 / 14 / 60 dagen — de extensie herkent automatisch alle filters die `vnd.proton.expire` + een `from`-adreslijst bevatten).
-   Na het toevoegen vraagt het paneel of ook **bestaande** mail van dat adres moet vervallen: alleen het geopende bericht, alle mail van die afzender, of niets. De termijn telt vanaf dat moment (zelfde mechanisme als Protons "self-destruct"); de berichten worden dan definitief verwijderd, niet naar de prullenbak verplaatst.
-4. Staat het adres al in een filter, dan toont die rij een rode **Verwijder**-knop; één klik haalt het adres er weer uit. Zo zie je meteen in welke filters het huidige adres zit.
-5. Klik op de filternaam om de huidige adreslijst uit- of in te klappen; met **×** verwijder je een adres weer.
-6. Zolang de zijbalk openstaat, loopt het adresveld automatisch mee met de mail die je opent. Typ je zelf een adres, dan blijft dat staan totdat je het veld leegmaakt of op **↻ afzender** klikt.
-7. **+ nieuw expire-filter** maakt een nieuw sieve-filter aan met een zelfgekozen aantal dagen.
+1. Open a mail in Proton Mail.
+2. Click the ⏳ button at the bottom right (or the extension's toolbar icon) → the sidebar opens and fills in the sender automatically. You can also type or paste something yourself: a full address, or a domain such as `@mail.example.com` (with or without the `@`). A domain is stored as the pattern `*@mail.example.com` and matches all senders on exactly that domain — subdomains are not included; add them separately.
+3. Click **Add** next to the filter you want. The extension automatically recognizes every filter that contains `vnd.proton.expire` plus a `from` address list.
+   After adding, the panel asks whether **existing** mail from that entry should expire too: only the opened message, all mail from that sender/domain, or nothing. The period counts from that moment (same mechanism as Proton's own "self-destruct"); expired messages are permanently deleted, not moved to trash.
+4. If the entry is already in a filter, that row shows a red **Remove** button instead; one click takes it out again. This makes it visible at a glance which filters contain the current entry.
+5. Click a filter name to expand or collapse its current entry list; the **×** next to an entry removes it.
+6. While the sidebar is open, the address field automatically follows the mail you open. If you typed something yourself, it stays until you clear the field or click the sender button.
+7. **+ new expire filter** creates a new sieve filter with a number of days of your choice.
+8. The language menu at the bottom switches the UI language (Dutch, English, and the ten most spoken world languages). The choice is remembered; the default follows your browser language.
 
-Elke wijziging wordt eerst gevalideerd via Protons eigen sieve-check-endpoint voordat hij wordt opgeslagen.
+Every change is validated through Proton's own sieve check endpoint before it is saved.
 
-## Hoe het technisch werkt
+## How it works technically
 
-- `inject.js` draait in de paginacontext en vangt de headers `x-pm-uid` en `x-pm-appversion` op van Protons eigen fetch-calls. De extensie slaat **geen** wachtwoorden of tokens op; de sessie-cookie (httpOnly) wordt automatisch door de browser meegestuurd omdat de calls same-origin zijn.
-- `content.js` praat met:
-  - `GET /api/mail/v4/filters` — filters ophalen
-  - `PUT /api/mail/v4/filters/check` — sieve valideren
-  - `PUT /api/mail/v4/filters/{id}` — filter bijwerken
-  - `POST /api/mail/v4/filters` — filter aanmaken
-  - `GET /api/mail/v4/messages` — bestaande mail van een afzender opzoeken
-  - `PUT /api/mail/v4/messages/expire` — vervaldatum op bestaande berichten zetten (Protons "self-destruct")
-- Endpoints en `FILTER_VERSION = 2` komen uit Protons open-source clientcode: `github.com/ProtonMail/WebClients`, `packages/shared/lib/api/filters.ts` en `packages/components/containers/filters/constants.ts`.
+- `inject.js` runs in the page context and captures the `x-pm-uid` and `x-pm-appversion` headers from Proton's own fetch calls. The extension stores **no** passwords or tokens; the (httpOnly) session cookie is sent automatically by the browser because all calls are same-origin.
+- `i18n.js` holds all UI strings (11 languages) and the language preference.
+- `content.js` talks to:
+  - `GET /api/mail/v4/filters` — fetch filters
+  - `PUT /api/mail/v4/filters/check` — validate sieve
+  - `PUT /api/mail/v4/filters/{id}` — update a filter
+  - `POST /api/mail/v4/filters` — create a filter
+  - `GET /api/mail/v4/messages` — look up existing mail from a sender
+  - `PUT /api/mail/v4/messages/expire` — set an expiration date on existing messages (Proton's "self-destruct")
+- `background.js` handles the toolbar icon: it toggles the sidebar on a Proton Mail tab and opens Proton Mail from anywhere else.
+- Endpoints and `FILTER_VERSION = 2` come from Proton's open-source client code: `github.com/ProtonMail/WebClients`, `packages/shared/lib/api/filters.ts` and `packages/components/containers/filters/constants.ts`.
 
-## Beperkingen en kanttekeningen (eerlijk)
+## Limitations and caveats (honest)
 
-- **Onofficiële API.** Proton documenteert deze API niet voor derden en kan hem zonder aankondiging wijzigen. Werkt het opeens niet meer: check in DevTools (Network-tab op mail.proton.me → Filters-pagina) of de paden/velden nog kloppen.
-- **Afzenderdetectie is DOM-gebaseerd** en kan breken bij een UI-update van Proton. Er zijn meerdere fallback-selectors plus een handmatig invoerveld, dus je kunt altijd verder.
-- **Sieve-parsing verwacht jouw template**: één `if address :is/:matches "from" [ ... ]`-blok per filter. Complexere sieve-scripts (meerdere blokken, `anyof`, etc.) worden overgeslagen of alleen het eerste blok wordt bewerkt. Bij de eerste wijziging zet de extensie een filter om van `:is` naar `:matches` (nodig voor domeinpatronen; voor gewone adressen gedraagt dat zich identiek).
-- De extensie werkt op `mail.proton.me`; de filterpagina op `account.proton.me` heeft hem niet nodig maar toont wijzigingen pas na een refresh.
-- Getest is de logica (sieve-parsing/-herschrijven) lokaal; de API-calls zelf kon ik hier niet live tegen jouw account testen. Eerste keer: probeer het met één testadres en controleer daarna in Instellingen → Filters of de sieve klopt.
+- **Unofficial API.** Proton does not document this API for third parties and can change it without notice. If things suddenly stop working: check in DevTools (Network tab on mail.proton.me → open the Filters page) whether the paths/fields still match.
+- **Sender detection is DOM-based** and can break when Proton updates its UI. There are fallback selectors plus a manual input field, so you can always continue.
+- **Sieve parsing expects the template**: one `if address :is/:matches "from" [ ... ]` block per filter. More complex sieve scripts (multiple blocks, `anyof`, etc.) are skipped, or only the first block is edited. On first modification the extension converts a filter from `:is` to `:matches` (needed for domain patterns; behaves identically for plain addresses).
+- The extension works on `mail.proton.me`; the filter page on `account.proton.me` does not need it but only shows changes after a refresh.
+- The sieve parsing/rewriting logic is tested locally; the API calls cannot be tested automatically without an account session. First time: try a single test address and verify the result in Proton Settings → Filters → Edit Sieve.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

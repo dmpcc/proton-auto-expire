@@ -224,4 +224,19 @@
 .pae-foot {
   padding: 10px 14px;
   border-top: 1px solid var(--pae-line);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
+.pae-lang {
+  background: var(--pae-bg2);
+  border: 1px solid var(--pae-line);
+  border-radius: 6px;
+  color: var(--pae-dim);
+  padding: 5px 6px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.pae-lang:focus-visible { outline: 2px solid var(--pae-accent); outline-offset: 1px; }

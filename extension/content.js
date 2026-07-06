@@ -21,6 +21,9 @@
 (() => {
   'use strict';
 
+  // Translation helper from i18n.js (loaded first, same isolated world).
+  const t = PAE_I18N.t;
+
   const FILTER_VERSION = 2; // FILTER_VERSION in Proton's client code
   // How often (ms) to re-check the opened mail while the panel is open.
   const FOLLOW_INTERVAL_MS = 1000;
@@ -78,10 +81,7 @@
   // ---------------------------------------------------------------------
   async function api(method, path, body) {
     if (!auth.uid) {
-      throw new Error(
-        'Nog geen sessie-headers opgevangen. Klik eerst ergens in Proton Mail ' +
-        '(bijv. open een mail) zodat de app zelf een API-call doet, en probeer opnieuw.'
-      );
+      throw new Error(t('sessionMissing'));
     }
     const headers = {
       'x-pm-uid': auth.uid,
@@ -243,6 +243,7 @@
   };
 
   let panel, addressInput, filterListEl, statusEl;
+  let toggleBtn, detectBtn, newBtn, langSelect;
   let busy = false;
   // Rendered filter rows, so membership marks can be updated without a reload.
   let rows = [];
@@ -257,19 +258,20 @@
     statusEl.className = 'pae-status' + (kind ? ` pae-${kind}` : '');
   }
 
+  function togglePanel() {
+    panel.classList.toggle('pae-open');
+    if (panel.classList.contains('pae-open')) {
+      onOpen();
+      startFollowing();
+    } else {
+      stopFollowing();
+    }
+  }
+
   function buildUI() {
     // Floating toggle button
-    const toggle = el('button', 'pae-toggle', '⏳');
-    toggle.title = 'Auto-expire afzender (Proton Auto-Expire)';
-    toggle.addEventListener('click', () => {
-      panel.classList.toggle('pae-open');
-      if (panel.classList.contains('pae-open')) {
-        onOpen();
-        startFollowing();
-      } else {
-        stopFollowing();
-      }
-    });
+    toggleBtn = el('button', 'pae-toggle', '⏳');
+    toggleBtn.addEventListener('click', togglePanel);
 
     panel = el('aside', 'pae-panel');
 
@@ -284,11 +286,9 @@
 
     const senderRow = el('div', 'pae-row');
     addressInput = el('input', 'pae-input');
-    addressInput.placeholder = 'afzender@voorbeeld.nl';
     addressInput.spellcheck = false;
     addressInput.addEventListener('input', updateMembership);
-    const detectBtn = el('button', 'pae-btn pae-ghost', '↻ afzender');
-    detectBtn.title = 'Afzender van geopende mail overnemen';
+    detectBtn = el('button', 'pae-btn pae-ghost');
     detectBtn.addEventListener('click', fillSender);
     senderRow.append(addressInput, detectBtn);
 
@@ -296,12 +296,41 @@
     statusEl = el('div', 'pae-status');
 
     const foot = el('footer', 'pae-foot');
-    const newBtn = el('button', 'pae-btn pae-ghost', '+ nieuw expire-filter');
+    newBtn = el('button', 'pae-btn pae-ghost');
     newBtn.addEventListener('click', onCreateFilter);
-    foot.append(newBtn);
+    langSelect = el('select', 'pae-lang');
+    PAE_I18N.LANGUAGES.forEach(({ code, name }) => {
+      const option = el('option', null, name);
+      option.value = code;
+      if (code === PAE_I18N.getLang()) option.selected = true;
+      langSelect.append(option);
+    });
+    langSelect.addEventListener('change', onLanguageChange);
+    foot.append(newBtn, langSelect);
 
     panel.append(head, senderRow, filterListEl, statusEl, foot);
-    document.body.append(toggle, panel);
+    document.body.append(toggleBtn, panel);
+    applyStaticTexts();
+  }
+
+  // Set every fixed label in the current language; called on build and on
+  // every language change.
+  function applyStaticTexts() {
+    toggleBtn.title = t('toggleTitle');
+    addressInput.placeholder = t('placeholder');
+    detectBtn.textContent = `↻ ${t('detectBtn')}`;
+    detectBtn.title = t('detectTitle');
+    newBtn.textContent = t('newFilterBtn');
+    langSelect.title = t('langTitle');
+    panel.dir = PAE_I18N.isRTL() ? 'rtl' : 'ltr';
+  }
+
+  function onLanguageChange() {
+    PAE_I18N.setLang(langSelect.value);
+    applyStaticTexts();
+    hideOffer();
+    setStatus('');
+    if (panel.classList.contains('pae-open')) renderFilters();
   }
 
   function fillSender() {
@@ -315,7 +344,7 @@
       // be added by accident.
       addressInput.value = '';
       lastAutoFill = null;
-      setStatus('Geen afzender gevonden in de geopende mail — typ of plak het adres zelf.', 'warn');
+      setStatus(t('noSender'), 'warn');
     }
     updateMembership();
   }
@@ -366,16 +395,16 @@
     hideOffer();
     offerEl = el('div', 'pae-offer');
     offerEl.append(
-      el('div', 'pae-offer-text', `Ook bestaande mail van ${addr} laten vervallen over ${days} dagen?`)
+      el('div', 'pae-offer-text', t('offerText', { entry: addr, d: days }))
     );
     const row = el('div', 'pae-offer-row');
-    const oneBtn = el('button', 'pae-btn pae-ghost', 'Dit bericht');
-    oneBtn.title = 'Alleen het geopende bericht';
+    const oneBtn = el('button', 'pae-btn pae-ghost', t('offerOne'));
+    oneBtn.title = t('offerOneTitle');
     oneBtn.addEventListener('click', () => onExpireOne(addr, days));
-    const allBtn = el('button', 'pae-btn pae-ghost', 'Alle mail');
-    allBtn.title = 'Alle bestaande berichten van dit adres';
+    const allBtn = el('button', 'pae-btn pae-ghost', t('offerAll'));
+    allBtn.title = t('offerAllTitle');
     allBtn.addEventListener('click', () => onExpireAll(addr, days));
-    const noBtn = el('button', 'pae-btn pae-ghost', 'Nee');
+    const noBtn = el('button', 'pae-btn pae-ghost', t('offerNo'));
     noBtn.addEventListener('click', hideOffer);
     row.append(oneBtn, allBtn, noBtn);
     offerEl.append(row);
@@ -385,20 +414,20 @@
   async function onExpireOne(addr, days) {
     if (busy) return;
     if (!entryMatchesAddress(addr, detectSender())) {
-      setStatus('De geopende mail hoort niet (meer) bij deze vermelding — open die mail en probeer opnieuw.', 'warn');
+      setStatus(t('staleMessage'), 'warn');
       return;
     }
     const id = detectOpenMessageId();
     if (!id) {
-      setStatus('Kon het geopende bericht niet identificeren.', 'err');
+      setStatus(t('noMessageId'), 'err');
       return;
     }
     busy = true;
     try {
-      setStatus('Vervaldatum instellen…');
+      setStatus(t('settingExpiration'));
       await expireMessages([id], days);
       hideOffer();
-      setStatus(`Dit bericht vervalt over ${days} dagen.`, 'ok');
+      setStatus(t('oneExpires', { d: days }), 'ok');
     } catch (e) {
       setStatus(e.message, 'err');
     } finally {
@@ -410,17 +439,17 @@
     if (busy) return;
     busy = true;
     try {
-      setStatus('Bestaande mail opzoeken…');
+      setStatus(t('searchingExisting'));
       const ids = await listMessagesFrom(addr);
       if (!ids.length) {
         hideOffer();
-        setStatus('Geen bestaande berichten van dit adres gevonden.', 'warn');
+        setStatus(t('noExisting'), 'warn');
         return;
       }
-      setStatus(`Vervaldatum instellen op ${ids.length} berichten…`);
+      setStatus(t('settingExpirationMany', { n: ids.length }));
       await expireMessages(ids, days);
       hideOffer();
-      setStatus(`${ids.length} berichten vervallen over ${days} dagen.`, 'ok');
+      setStatus(t('manyExpire', { n: ids.length, d: days }), 'ok');
     } catch (e) {
       setStatus(e.message, 'err');
     } finally {
@@ -431,7 +460,7 @@
   async function renderFilters() {
     filterListEl.textContent = '';
     rows = [];
-    setStatus('Filters laden…');
+    setStatus(t('loadingFilters'));
     let filters;
     try {
       filters = await getFilters();
@@ -446,9 +475,7 @@
       .filter((x) => x.parsed);
 
     if (!expireFilters.length) {
-      filterListEl.append(
-        el('div', 'pae-empty', 'Geen expire-filters gevonden. Maak er één aan met de knop hieronder.')
-      );
+      filterListEl.append(el('div', 'pae-empty', t('noFilters')));
       return;
     }
 
@@ -464,12 +491,10 @@
     const entry = normalizeEntry(addressInput.value);
     for (const { parsed, actionBtn } of rows) {
       const present = entry != null && parsed.addresses.includes(entry);
-      actionBtn.textContent = present ? 'Verwijder' : 'Voeg toe';
+      actionBtn.textContent = present ? t('removeBtn') : t('addBtn');
       actionBtn.classList.toggle('pae-del', present);
       actionBtn.classList.toggle('pae-add', !present);
-      actionBtn.title = present
-        ? 'Dit adres staat in dit filter — klik om het te verwijderen'
-        : `Verwijder mail van deze afzender automatisch na ${parsed.days} dagen`;
+      actionBtn.title = present ? t('presentTitle') : t('addTitle', { d: parsed.days });
     }
   }
 
@@ -479,13 +504,13 @@
     const main = el('div', 'pae-filter-main');
     const label = el('button', 'pae-filter-label');
     label.append(
-      el('span', 'pae-days', `${parsed.days} dgn`),
+      el('span', 'pae-days', t('daysShort', { d: parsed.days })),
       el('span', 'pae-name', filter.Name),
       el('span', 'pae-count', `${parsed.addresses.length}`)
     );
-    // One button that adapts: "Voeg toe" normally, "Verwijder" when the
-    // address in the input field is already in this filter's list.
-    const actionBtn = el('button', 'pae-btn pae-add', 'Voeg toe');
+    // One button that adapts: "add" normally, "remove" when the entry in the
+    // input field is already in this filter's list.
+    const actionBtn = el('button', 'pae-btn pae-add', t('addBtn'));
     actionBtn.addEventListener('click', () => {
       const entry = normalizeEntry(addressInput.value);
       if (entry && parsed.addresses.includes(entry)) {
@@ -502,7 +527,7 @@
       const item = el('div', 'pae-address');
       item.append(el('span', null, a));
       const rm = el('button', 'pae-rm', '×');
-      rm.title = 'Verwijder uit filter';
+      rm.title = t('removeEntryTitle');
       rm.addEventListener('click', () => onRemove(filter, parsed, a));
       item.append(rm);
       details.append(item);
@@ -517,9 +542,9 @@
     if (busy) return false;
     busy = true;
     try {
-      setStatus('Valideren…');
+      setStatus(t('validating'));
       await checkSieve(newSieve, filter.Version || FILTER_VERSION);
-      setStatus('Opslaan…');
+      setStatus(t('saving'));
       await updateFilter({ ...filter, Sieve: newSieve });
       setStatus(successMsg, 'ok');
       await renderFilters();
@@ -535,15 +560,15 @@
   async function onAdd(filter, parsed) {
     const entry = normalizeEntry(addressInput.value);
     if (!entry) {
-      setStatus('Vul eerst een geldig e-mailadres of domein in (bijv. naam@site.nl of @site.nl).', 'warn');
+      setStatus(t('invalidEntry'), 'warn');
       return;
     }
     if (parsed.addresses.includes(entry)) {
-      setStatus(`${entry} staat al in "${filter.Name}".`, 'warn');
+      setStatus(t('alreadyIn', { entry, name: filter.Name }), 'warn');
       return;
     }
     const newSieve = sieveWithAddresses(filter.Sieve, [...parsed.addresses, entry]);
-    const saved = await saveSieve(filter, newSieve, `${entry} → verwijderen na ${parsed.days} dagen ✔`);
+    const saved = await saveSieve(filter, newSieve, t('addedOk', { entry, d: parsed.days }));
     // The filter only affects incoming mail; offer to expire existing mail too.
     if (saved) showExpireOffer(entry, parsed.days);
   }
@@ -551,37 +576,37 @@
   async function onRemove(filter, parsed, addr) {
     const remaining = parsed.addresses.filter((a) => a !== addr);
     if (!remaining.length) {
-      setStatus('Laatste adres kan hier niet verwijderd worden (sieve zou ongeldig worden). Doe dit via de Proton-instellingen.', 'warn');
+      setStatus(t('lastAddress'), 'warn');
       return;
     }
     const newSieve = sieveWithAddresses(filter.Sieve, remaining);
-    await saveSieve(filter, newSieve, `${addr} verwijderd uit "${filter.Name}".`);
+    await saveSieve(filter, newSieve, t('removedOk', { entry: addr, name: filter.Name }));
   }
 
   async function onCreateFilter() {
     const addr = normalizeEntry(addressInput.value);
     if (!addr) {
-      setStatus('Vul eerst een e-mailadres of domein in; het nieuwe filter start daarmee.', 'warn');
+      setStatus(t('createNeedsEntry'), 'warn');
       return;
     }
-    const daysStr = prompt('Na hoeveel dagen definitief verwijderen?', '14');
+    const daysStr = prompt(t('promptDays'), '14');
     if (!daysStr) return;
     const days = parseInt(daysStr, 10);
     if (!Number.isInteger(days) || days < 1) {
-      setStatus('Ongeldig aantal dagen.', 'warn');
+      setStatus(t('invalidDays'), 'warn');
       return;
     }
-    const name = prompt('Naam van het filter:', `Delete after ${days} days`);
+    const name = prompt(t('promptName'), t('defaultFilterName', { d: days }));
     if (!name) return;
     const sieve = newExpireSieve(addr, days);
     if (busy) return;
     busy = true;
     try {
-      setStatus('Valideren…');
+      setStatus(t('validating'));
       await checkSieve(sieve, FILTER_VERSION);
-      setStatus('Aanmaken…');
+      setStatus(t('creating'));
       await createFilter(name, sieve);
-      setStatus(`Filter "${name}" aangemaakt met ${addr}.`, 'ok');
+      setStatus(t('filterCreated', { name, entry: addr }), 'ok');
       await renderFilters();
     } catch (e) {
       setStatus(e.message, 'err');
@@ -591,6 +616,13 @@
   }
 
   // ---------------------------------------------------------------------
+  // The toolbar button (see background.js) toggles the panel too.
+  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg && msg.type === 'PAE_TOGGLE_PANEL' && panel) togglePanel();
+    });
+  }
+
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', buildUI);
   } else {
