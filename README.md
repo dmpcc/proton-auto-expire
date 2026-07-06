@@ -19,8 +19,10 @@ Na een code-wijziging: herlaadknop bij de extensie op `vivaldi://extensions`, da
 1. Open een mail in Proton Mail.
 2. Klik op de ⏳-knop rechtsonder → de zijbalk opent en vult de afzender automatisch in (of typ/plak zelf een adres).
 3. Klik **Voeg toe** bij het gewenste filter (3 / 7 / 14 / 60 dagen — de extensie herkent automatisch alle filters die `vnd.proton.expire` + een `from`-adreslijst bevatten).
-4. Klik op de filternaam om de huidige adreslijst uit- of in te klappen; met **×** verwijder je een adres weer.
-5. **+ nieuw expire-filter** maakt een nieuw sieve-filter aan met een zelfgekozen aantal dagen.
+4. Staat het adres al in een filter, dan toont die rij een rode **Verwijder**-knop; één klik haalt het adres er weer uit. Zo zie je meteen in welke filters het huidige adres zit.
+5. Klik op de filternaam om de huidige adreslijst uit- of in te klappen; met **×** verwijder je een adres weer.
+6. Zolang de zijbalk openstaat, loopt het adresveld automatisch mee met de mail die je opent. Typ je zelf een adres, dan blijft dat staan totdat je het veld leegmaakt of op **↻ afzender** klikt.
+7. **+ nieuw expire-filter** maakt een nieuw sieve-filter aan met een zelfgekozen aantal dagen.
 
 Elke wijziging wordt eerst gevalideerd via Protons eigen sieve-check-endpoint voordat hij wordt opgeslagen.
 

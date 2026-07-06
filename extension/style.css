@@ -119,6 +119,14 @@
   font-weight: 600;
 }
 .pae-add:hover { filter: brightness(1.1); }
+/* Same button flips to "remove" when the address is already in the filter. */
+.pae-del {
+  background: transparent;
+  border-color: var(--pae-err);
+  color: var(--pae-err);
+  font-weight: 600;
+}
+.pae-del:hover { filter: brightness(1.15); }
 
 .pae-filters {
   flex: 1;

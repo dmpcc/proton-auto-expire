@@ -20,6 +20,8 @@
   'use strict';
 
   const FILTER_VERSION = 2; // FILTER_VERSION in Proton's client code
+  // How often (ms) to re-check the opened mail while the panel is open.
+  const FOLLOW_INTERVAL_MS = 1000;
   // Unanchored: used to find an address inside larger text (sender detection).
   const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
   // Anchored: the typed input must be exactly one address, nothing around it.
@@ -162,6 +164,11 @@
 
   let panel, addressInput, filterListEl, statusEl;
   let busy = false;
+  // Rendered filter rows, so membership marks can be updated without a reload.
+  let rows = [];
+  // Last value we auto-filled; lets us tell auto-filled from hand-typed input.
+  let lastAutoFill = null;
+  let followTimer = null;
 
   function setStatus(msg, kind = '') {
     statusEl.textContent = msg;
@@ -174,7 +181,12 @@
     toggle.title = 'Auto-expire afzender (Proton Auto-Expire)';
     toggle.addEventListener('click', () => {
       panel.classList.toggle('pae-open');
-      if (panel.classList.contains('pae-open')) onOpen();
+      if (panel.classList.contains('pae-open')) {
+        onOpen();
+        startFollowing();
+      } else {
+        stopFollowing();
+      }
     });
 
     panel = el('aside', 'pae-panel');
@@ -182,13 +194,17 @@
     const head = el('header', 'pae-head');
     head.append(el('span', 'pae-title', 'Auto-expire'));
     const close = el('button', 'pae-close', '×');
-    close.addEventListener('click', () => panel.classList.remove('pae-open'));
+    close.addEventListener('click', () => {
+      panel.classList.remove('pae-open');
+      stopFollowing();
+    });
     head.append(close);
 
     const senderRow = el('div', 'pae-row');
     addressInput = el('input', 'pae-input');
     addressInput.placeholder = 'afzender@voorbeeld.nl';
     addressInput.spellcheck = false;
+    addressInput.addEventListener('input', updateMembership);
     const detectBtn = el('button', 'pae-btn pae-ghost', '↻ afzender');
     detectBtn.title = 'Afzender van geopende mail overnemen';
     detectBtn.addEventListener('click', fillSender);
@@ -210,12 +226,41 @@
     const s = detectSender();
     if (s) {
       addressInput.value = s;
+      lastAutoFill = s;
       setStatus('');
     } else {
       // Clear the field so a stale address from a previous mail can never
       // be added by accident.
       addressInput.value = '';
+      lastAutoFill = null;
       setStatus('Geen afzender gevonden in de geopende mail — typ of plak het adres zelf.', 'warn');
+    }
+    updateMembership();
+  }
+
+  // While the panel is open, keep the address field in sync with whatever
+  // mail is opened — but never overwrite something the user typed themselves.
+  function followSender() {
+    const s = detectSender();
+    if (!s || s === lastAutoFill) return;
+    const untouched = !addressInput.value || addressInput.value === lastAutoFill;
+    lastAutoFill = s;
+    if (untouched) {
+      addressInput.value = s;
+      setStatus('');
+      updateMembership();
+    }
+  }
+
+  function startFollowing() {
+    stopFollowing();
+    followTimer = setInterval(followSender, FOLLOW_INTERVAL_MS);
+  }
+
+  function stopFollowing() {
+    if (followTimer) {
+      clearInterval(followTimer);
+      followTimer = null;
     }
   }
 
@@ -226,6 +271,7 @@
 
   async function renderFilters() {
     filterListEl.textContent = '';
+    rows = [];
     setStatus('Filters laden…');
     let filters;
     try {
@@ -250,6 +296,22 @@
     expireFilters
       .sort((a, b) => a.parsed.days - b.parsed.days)
       .forEach(({ filter, parsed }) => filterListEl.append(filterRow(filter, parsed)));
+    updateMembership();
+  }
+
+  // Reflect in each row whether the current address is already in that filter:
+  // the action button flips between "Voeg toe" and "Verwijder".
+  function updateMembership() {
+    const addr = addressInput.value.trim().toLowerCase();
+    for (const { parsed, actionBtn } of rows) {
+      const present = parsed.addresses.includes(addr);
+      actionBtn.textContent = present ? 'Verwijder' : 'Voeg toe';
+      actionBtn.classList.toggle('pae-del', present);
+      actionBtn.classList.toggle('pae-add', !present);
+      actionBtn.title = present
+        ? 'Dit adres staat in dit filter — klik om het te verwijderen'
+        : `Verwijder mail van deze afzender automatisch na ${parsed.days} dagen`;
+    }
   }
 
   function filterRow(filter, parsed) {
@@ -262,10 +324,19 @@
       el('span', 'pae-name', filter.Name),
       el('span', 'pae-count', `${parsed.addresses.length}`)
     );
-    const addBtn = el('button', 'pae-btn pae-add', 'Voeg toe');
-    addBtn.title = `Verwijder mail van deze afzender automatisch na ${parsed.days} dagen`;
-    addBtn.addEventListener('click', () => onAdd(filter, parsed));
-    main.append(label, addBtn);
+    // One button that adapts: "Voeg toe" normally, "Verwijder" when the
+    // address in the input field is already in this filter's list.
+    const actionBtn = el('button', 'pae-btn pae-add', 'Voeg toe');
+    actionBtn.addEventListener('click', () => {
+      const addr = addressInput.value.trim().toLowerCase();
+      if (parsed.addresses.includes(addr)) {
+        onRemove(filter, parsed, addr);
+      } else {
+        onAdd(filter, parsed);
+      }
+    });
+    main.append(label, actionBtn);
+    rows.push({ parsed, actionBtn });
 
     const details = el('div', 'pae-addresses');
     parsed.addresses.forEach((a) => {
