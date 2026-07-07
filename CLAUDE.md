@@ -9,7 +9,7 @@ Chromium browser extension (MV3, loaded "unpacked" in Vivaldi) that adds a sideb
 - `extension/` — the actual extension. This is the directory loaded in Vivaldi via "Load unpacked". Only shipping code goes here.
   - `manifest.json` — MV3; toolbar action, background service worker, and content scripts on `https://mail.proton.me/*`
   - `inject.js` — runs in the page context (`world: MAIN`), captures the `x-pm-uid` and `x-pm-appversion` headers from Proton's own fetch calls
-  - `i18n.js` — all UI strings (11 languages) plus the language preference; loaded before `content.js` in the same isolated world
+  - `i18n.js` — all UI strings (21 languages) plus the language preference; loaded before `content.js` in the same isolated world. Menu order is European languages first, large non-European languages last
   - `content.js` — all logic: API calls, sieve parsing/rewriting, sidebar UI
   - `background.js` — toolbar icon click: toggles the sidebar on a Proton Mail tab, opens Proton Mail elsewhere
   - `style.css` — sidebar styling

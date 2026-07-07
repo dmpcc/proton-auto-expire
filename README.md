@@ -24,14 +24,14 @@ After a code change: click the reload button next to the extension on `vivaldi:/
 5. Click a filter name to expand or collapse its current entry list; the **×** next to an entry removes it.
 6. While the sidebar is open, the address field automatically follows the mail you open. If you typed something yourself, it stays until you clear the field or click the sender button.
 7. **+ new expire filter** creates a new sieve filter with a number of days of your choice.
-8. The language menu at the bottom switches the UI language (Dutch, English, and the ten most spoken world languages). The choice is remembered; the default follows your browser language.
+8. The language menu at the bottom switches the UI language (21 languages: the major European languages first, since that is Proton's core audience, followed by the large non-European world languages). The choice is remembered; the default follows your browser language.
 
 Every change is validated through Proton's own sieve check endpoint before it is saved.
 
 ## How it works technically
 
 - `inject.js` runs in the page context and captures the `x-pm-uid` and `x-pm-appversion` headers from Proton's own fetch calls. The extension stores **no** passwords or tokens; the (httpOnly) session cookie is sent automatically by the browser because all calls are same-origin.
-- `i18n.js` holds all UI strings (11 languages) and the language preference.
+- `i18n.js` holds all UI strings (21 languages) and the language preference.
 - `content.js` talks to:
   - `GET /api/mail/v4/filters` — fetch filters
   - `PUT /api/mail/v4/filters/check` — validate sieve
