@@ -13,6 +13,7 @@ Chromium browser extension (MV3, loaded "unpacked" in Vivaldi) that adds a sideb
   - `content.js` — all logic: API calls, sieve parsing/rewriting, sidebar UI
   - `background.js` — toolbar icon click: toggles the sidebar on a Proton Mail tab, opens Proton Mail elsewhere
   - `style.css` — sidebar styling
+- `assets/icon.svg` — source for the toolbar icons (Proton-purple squircle with a white hourglass). Regenerate the PNGs after editing it: `magick -background none assets/icon.svg -resize 128x128 -depth 8 PNG32:extension/icon128.png` (and `48x48` for `icon48.png`).
 - `upstream/filters.ts` — snapshot of the Proton client code our API calls are based on (source: `github.com/ProtonMail/WebClients`, path `packages/shared/lib/api/filters.ts`)
 - `scripts/check-upstream.sh` — fetches the current version of that file and diffs it against the snapshot; first step for any API problem
 

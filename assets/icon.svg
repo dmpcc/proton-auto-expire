@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- Proton Auto-Expire icon: Proton-purple squircle with a white hourglass
+       (hourglass = the "auto-expire" idea). Colors follow Proton's brand
+       purple (#6D4AFF) with a lighter top for depth. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8A6EFF"/>
+      <stop offset="1" stop-color="#6D4AFF"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="128" height="128" rx="30" ry="30" fill="url(#bg)"/>
+  <g fill="#ffffff">
+    <!-- top and bottom frame bars -->
+    <rect x="36" y="32" width="56" height="8" rx="4"/>
+    <rect x="36" y="88" width="56" height="8" rx="4"/>
+    <!-- upper funnel (points down to the centre) -->
+    <polygon points="41,40 87,40 64,64"/>
+    <!-- lower funnel (points up to the centre) -->
+    <polygon points="64,64 41,88 87,88"/>
+  </g>
+</svg>
