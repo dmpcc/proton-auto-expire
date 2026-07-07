@@ -6,7 +6,8 @@ The extension edits your existing sieve expire filters through the same internal
 
 ## Installation (Vivaldi / Chrome / Brave)
 
-1. Clone or download this repository to a fixed location.
+1. Clone or download this repository to a fixed location:
+   `git clone https://github.com/dmpcc/proton-auto-expire.git`
 2. Go to `vivaldi://extensions` (or `chrome://extensions`).
 3. Enable **Developer mode** (top right).
 4. Click **Load unpacked** and select the **`extension/` subdirectory** (not the project root).

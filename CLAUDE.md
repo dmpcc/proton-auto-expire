@@ -33,7 +33,7 @@ Chromium browser extension (MV3, loaded "unpacked" in Vivaldi) that adds a sideb
 **Symptom: the sender button finds nothing or the wrong sender.**
 Search Proton's open-source client (`github.com/ProtonMail/WebClients`) for the current `data-testid` on the message header components (HeaderExpanded.tsx, RecipientItemLayout.tsx) instead of asking the user to inspect the DOM. Keep existing selectors as fallbacks unless they match the wrong element.
 
-**Testing after every change:** open `vivaldi://extensions`, click reload next to the extension, refresh the mail.proton.me tab, open the sidebar, update a filter with a test address and verify the result in Proton Settings (Filters, Edit Sieve). The sieve parse/rewrite logic can be tested standalone in Node (see git history for an example script); the live API cannot be tested without an account session.
+**Testing after every change:** open `vivaldi://extensions`, click reload next to the extension, refresh the mail.proton.me tab, open the sidebar, update a filter with a test address and verify the result in Proton Settings (Filters, Edit Sieve). The pure logic (sieve parse/rewrite, `normalizeEntry`, `entryMatchesAddress`) can be copied into a throwaway Node script and asserted without a browser; the i18n key sets can be compared against `en` the same way. The live API cannot be tested without an account session.
 
 ## Conventions
 
@@ -42,4 +42,4 @@ Search Proton's open-source client (`github.com/ProtonMail/WebClients`) for the 
 - Ask first, build second: for new features, briefly propose the approach before building.
 - Bump the version in `extension/manifest.json` on every functional change (semver: patch for fixes, minor for features).
 - No dependencies or build step; the extension stays vanilla JS that loads directly as unpacked.
-- The repository is intended to become public: no personal data (email addresses, screenshots) in commits.
+- The repository is public: never commit personal data (real names, private email addresses, screenshots). Commits use the alias `dmpcc <github.reply@dmp.cc>`.
