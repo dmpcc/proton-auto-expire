@@ -44,9 +44,8 @@
   const SWEEP_INTERVAL_MS = 15 * 60 * 1000; // periodic background sweep
   // Automatic sweeps skip if another tab swept more recently than this.
   const SWEEP_MIN_GAP_MS = 13 * 60 * 1000;
-  // Success feedback (green tick, ok status) lingers this long, then fades.
-  const FEEDBACK_FADE_DELAY_MS = 5000;
-  const FEEDBACK_REMOVE_MS = FEEDBACK_FADE_DELAY_MS + 800; // after the fade
+  // Success status messages linger this long, then fade out.
+  const FEEDBACK_FADE_DELAY_MS = 10000;
   // Unanchored: used to find an address inside larger text (sender detection).
   const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
   // Anchored: the typed input must be exactly one address, nothing around it.
@@ -288,10 +287,8 @@
       setStatus(t('sweeping'));
       const moved = await sweepRules(rules);
       setStatus(moved ? t('sweptResult', { n: moved }) : t('sweptNone'), moved ? 'ok' : '');
-      return moved;
     } catch (e) {
       setStatus(e.message, 'err');
-      return undefined;
     } finally {
       busy = false;
     }
@@ -436,21 +433,6 @@
     }
   }
 
-  // Transient green tick next to an action button: visible for a few seconds,
-  // then fades out and is removed.
-  function flashTick(btn) {
-    if (!btn) return;
-    const tick = el('span', 'pae-tick', '✔');
-    btn.after(tick);
-    setTimeout(() => tick.classList.add('pae-fade-out'), FEEDBACK_FADE_DELAY_MS);
-    setTimeout(() => tick.remove(), FEEDBACK_REMOVE_MS);
-  }
-
-  // Rows are rebuilt after every change, so look the fresh button up by ID.
-  const filterRowBtn = (filterId) =>
-    (rows.find((r) => r.filter.ID === filterId) || {}).actionBtn;
-  const ruleRowBtn = (ruleId) =>
-    (archiveRows.find((r) => r.rule.id === ruleId) || {}).actionBtn;
 
   function togglePanel() {
     panel.classList.toggle('pae-open');
@@ -505,10 +487,7 @@
     newRuleBtn = el('button', 'pae-btn pae-ghost');
     newRuleBtn.addEventListener('click', onCreateRule);
     sweepBtn = el('button', 'pae-btn pae-ghost');
-    sweepBtn.addEventListener('click', async () => {
-      const moved = await runSweep({ manual: true });
-      if (typeof moved === 'number') flashTick(sweepBtn);
-    });
+    sweepBtn.addEventListener('click', () => runSweep({ manual: true }));
     const archiveActions = el('div', 'pae-section-actions');
     archiveActions.append(newRuleBtn, sweepBtn);
 
@@ -772,7 +751,7 @@
       }
     });
     main.append(label, actionBtn);
-    rows.push({ filter, parsed, actionBtn });
+    rows.push({ parsed, actionBtn });
 
     const details = el('div', 'pae-addresses');
     parsed.addresses.forEach((a) => {
@@ -821,11 +800,8 @@
     }
     const newSieve = sieveWithAddresses(filter.Sieve, [...parsed.addresses, entry]);
     const saved = await saveSieve(filter, newSieve, t('addedOk', { entry, d: parsed.days }));
-    if (saved) {
-      flashTick(filterRowBtn(filter.ID));
-      // The filter only affects incoming mail; offer to expire existing mail too.
-      showExpireOffer(entry, parsed.days);
-    }
+    // The filter only affects incoming mail; offer to expire existing mail too.
+    if (saved) showExpireOffer(entry, parsed.days);
   }
 
   async function onRemove(filter, parsed, addr) {
@@ -835,8 +811,7 @@
       return;
     }
     const newSieve = sieveWithAddresses(filter.Sieve, remaining);
-    const saved = await saveSieve(filter, newSieve, t('removedOk', { entry: addr, name: filter.Name }));
-    if (saved) flashTick(filterRowBtn(filter.ID));
+    await saveSieve(filter, newSieve, t('removedOk', { entry: addr, name: filter.Name }));
   }
 
   async function onCreateFilter() {
@@ -945,7 +920,6 @@
     rule.entries.push(entry);
     await saveArchiveRules();
     renderArchiveRules();
-    flashTick(ruleRowBtn(rule.id));
     // Moves are reversible, so sweep this rule right away without confirming.
     runSweep({ manual: true, rules: [rule] });
   }
@@ -967,7 +941,6 @@
     await saveArchiveRules();
     renderArchiveRules();
     setStatus(t('removedOk', { entry, name: rule.folderName }), 'ok');
-    flashTick(ruleRowBtn(rule.id));
   }
 
   async function onCreateRule() {
@@ -1040,7 +1013,6 @@
     await saveArchiveRules();
     renderArchiveRules();
     setStatus(t('ruleCreated', { d: days, folder: folderName }), 'ok');
-    flashTick(ruleRowBtn(rule.id));
     // Apply the new rule to existing inbox mail immediately.
     runSweep({ manual: true, rules: [rule] });
   }

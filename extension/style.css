@@ -257,17 +257,7 @@
   transition: opacity 0.8s ease;
 }
 
-/* Transient success tick next to an action button. */
-.pae-tick {
-  flex: none;
-  color: var(--pae-ok);
-  font-weight: 700;
-  margin-inline-start: 6px;
-  opacity: 1;
-  transition: opacity 0.8s ease;
-}
-
-/* Fades success feedback (status line and ticks) after a short linger. */
+/* Fades the status line after a success message has lingered. */
 .pae-fade-out { opacity: 0; }
 .pae-ok { color: var(--pae-ok); }
 .pae-warn { color: var(--pae-warn); }
