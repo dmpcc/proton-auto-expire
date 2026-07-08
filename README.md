@@ -45,6 +45,14 @@ Rules are stored per browser (in `chrome.storage.local`), so they do not sync be
 
 **Recommended combination:** an auto-archive rule (e.g. move to a folder after 7 days) works well together with an auto-expire filter (e.g. delete after 60 days) for the same sender. Proton sets a message's expiration at delivery and it travels with the message, so a mail that is later moved to a folder by auto-archive still expires on schedule.
 
+### Inbox analysis
+
+The third section, **Inbox analysis**, answers "which senders flood my inbox?" so you know where a filter would pay off.
+
+Click **Analyze inbox** and the extension pages through your inbox metadata (sender, date and unread flag only — never message content; capped at 3000 messages) and shows the top 15 senders by message count, each with how many of those messages are unread. A high unread count is the strongest signal that you never read that sender and should filter it.
+
+Clicking a result puts that address in the input field, so the Add/Remove buttons of your expire filters and archive rules immediately show where it already belongs and where you can add it. The results are a snapshot: they disappear when the panel is reopened and are never stored.
+
 ## How it works technically
 
 - `inject.js` runs in the page context and captures the `x-pm-uid` and `x-pm-appversion` headers from Proton's own fetch calls. The extension stores **no** passwords or tokens; the (httpOnly) session cookie is sent automatically by the browser because all calls are same-origin.
@@ -54,7 +62,7 @@ Rules are stored per browser (in `chrome.storage.local`), so they do not sync be
   - `PUT /api/mail/v4/filters/check` — validate sieve
   - `PUT /api/mail/v4/filters/{id}` — update a filter
   - `POST /api/mail/v4/filters` — create a filter
-  - `GET /api/mail/v4/messages` — look up existing mail from a sender
+  - `GET /api/mail/v4/messages` — look up existing mail from a sender, and page through inbox metadata for the inbox analysis
   - `PUT /api/mail/v4/messages/expire` — set an expiration date on existing messages (Proton's "self-destruct")
   - `GET /api/core/v4/labels?Type=3` — list the user's custom folders (auto-archive destinations)
   - `PUT /api/mail/v4/messages/label` — move messages into a folder (auto-archive)

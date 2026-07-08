@@ -10,7 +10,7 @@ Chromium browser extension (MV3, loaded "unpacked" in Vivaldi) that adds a sideb
   - `manifest.json` — MV3; toolbar action, background service worker, and content scripts on `https://mail.proton.me/*`
   - `inject.js` — runs in the page context (`world: MAIN`), captures the `x-pm-uid` and `x-pm-appversion` headers from Proton's own fetch calls
   - `i18n.js` — all UI strings (21 languages) plus the language preference; loaded before `content.js` in the same isolated world. Menu order is European languages first, large non-European languages last
-  - `content.js` — all logic: API calls, sieve parsing/rewriting, sidebar UI, and the client-side auto-archive rules (storage + sweep)
+  - `content.js` — all logic: API calls, sieve parsing/rewriting, sidebar UI, the client-side auto-archive rules (storage + sweep), and the on-demand inbox analysis (top senders by count, metadata only, capped scan)
   - `background.js` — toolbar icon click: toggles the sidebar on a Proton Mail tab, opens Proton Mail elsewhere
   - `style.css` — sidebar styling
 - `assets/icon.svg` — source for the toolbar icons (Proton-purple squircle with a white hourglass). Regenerate the PNGs after editing it: `magick -background none assets/icon.svg -resize 128x128 -depth 8 PNG32:extension/icon128.png` (and `48x48` for `icon48.png`).

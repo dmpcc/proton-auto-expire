@@ -46,6 +46,9 @@
   const SWEEP_MIN_GAP_MS = 13 * 60 * 1000;
   // Success status messages linger this long, then fade out.
   const FEEDBACK_FADE_DELAY_MS = 10000;
+  // Inbox analysis: scan cap (pages x page size) and result list length.
+  const ANALYZE_MAX_PAGES = 20; // at most 3000 inbox messages per scan
+  const ANALYZE_TOP_COUNT = 15;
   // Unanchored: used to find an address inside larger text (sender detection).
   const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
   // Anchored: the typed input must be exactly one address, nothing around it.
@@ -180,6 +183,35 @@
         IDs: ids.slice(i, i + MESSAGES_PAGE_SIZE),
       });
     }
+  }
+
+  // Page through inbox metadata and count messages per sender address.
+  // Only metadata is read (sender, unread flag), never message content.
+  // onProgress receives the number of messages scanned so far.
+  async function scanInboxSenders(onProgress) {
+    const bySender = new Map(); // address -> { count, unread }
+    let scanned = 0;
+    for (let page = 0; page < ANALYZE_MAX_PAGES; page++) {
+      const q = new URLSearchParams({
+        LabelID: INBOX_LABEL_ID,
+        Page: String(page),
+        PageSize: String(MESSAGES_PAGE_SIZE),
+      });
+      const res = await api('GET', `/api/mail/v4/messages?${q}`);
+      const msgs = res.Messages || [];
+      for (const m of msgs) {
+        const sender = ((m.Sender && m.Sender.Address) || '').toLowerCase();
+        if (!sender) continue;
+        const stats = bySender.get(sender) || { count: 0, unread: 0 };
+        stats.count += 1;
+        if (m.Unread) stats.unread += 1;
+        bySender.set(sender, stats);
+      }
+      scanned += msgs.length;
+      onProgress(scanned);
+      if (msgs.length < MESSAGES_PAGE_SIZE) break;
+    }
+    return { bySender, scanned };
   }
 
   // Same mechanism as Proton's own "self-destruct in x days": the messages
@@ -399,9 +431,9 @@
     return n;
   };
 
-  let panel, addressInput, filterListEl, statusEl, archiveListEl;
-  let expireHeaderEl, archiveHeaderEl, archiveHintEl;
-  let toggleBtn, detectBtn, newBtn, newRuleBtn, sweepBtn, langSelect;
+  let panel, addressInput, filterListEl, statusEl, archiveListEl, analysisListEl;
+  let expireHeaderEl, archiveHeaderEl, archiveHintEl, analyzeHeaderEl;
+  let toggleBtn, detectBtn, newBtn, newRuleBtn, sweepBtn, analyzeBtn, langSelect;
   let busy = false;
   // Rendered expire-filter rows, so membership marks update without a reload.
   let rows = [];
@@ -491,9 +523,18 @@
     const archiveActions = el('div', 'pae-section-actions');
     archiveActions.append(newRuleBtn, sweepBtn);
 
+    // Inbox analysis (on-demand snapshot of the busiest senders).
+    analyzeHeaderEl = el('div', 'pae-section');
+    analyzeBtn = el('button', 'pae-btn pae-ghost');
+    analyzeBtn.addEventListener('click', onAnalyzeInbox);
+    const analyzeActions = el('div', 'pae-section-actions');
+    analyzeActions.append(analyzeBtn);
+    analysisListEl = el('div', 'pae-filters');
+
     body.append(
       expireHeaderEl, filterListEl, newFilterRow,
-      archiveHeaderEl, archiveHintEl, archiveListEl, archiveActions
+      archiveHeaderEl, archiveHintEl, archiveListEl, archiveActions,
+      analyzeHeaderEl, analyzeActions, analysisListEl
     );
 
     statusEl = el('div', 'pae-status');
@@ -528,6 +569,8 @@
     archiveHintEl.textContent = t('archiveHint');
     newRuleBtn.textContent = t('newRuleBtn');
     sweepBtn.textContent = t('sweepBtn');
+    analyzeHeaderEl.textContent = t('analyzeSection');
+    analyzeBtn.textContent = t('analyzeBtn');
     langSelect.title = t('langTitle');
     panel.dir = PAE_I18N.isRTL() ? 'rtl' : 'ltr';
   }
@@ -538,6 +581,8 @@
     hideOffer();
     hidePicker();
     setStatus('');
+    // Analysis results contain per-row translated labels; clear the snapshot.
+    analysisListEl.textContent = '';
     if (panel.classList.contains('pae-open')) {
       renderFilters();
       renderArchiveRules();
@@ -589,6 +634,8 @@
   async function onOpen() {
     hideOffer();
     hidePicker();
+    // The analysis is a snapshot; start each panel session fresh.
+    analysisListEl.textContent = '';
     fillSender();
     await renderFilters();
     // Reload rules so changes made in another tab are reflected.
@@ -1015,6 +1062,52 @@
     setStatus(t('ruleCreated', { d: days, folder: folderName }), 'ok');
     // Apply the new rule to existing inbox mail immediately.
     runSweep({ manual: true, rules: [rule] });
+  }
+
+  // ---------------------------------------------------------------------
+  // Inbox analysis UI
+  // ---------------------------------------------------------------------
+  async function onAnalyzeInbox() {
+    if (busy) return;
+    busy = true;
+    analysisListEl.textContent = '';
+    try {
+      const { bySender, scanned } = await scanInboxSenders((n) =>
+        setStatus(t('analyzing', { n })));
+      if (!scanned) {
+        setStatus(t('analysisEmpty'), 'warn');
+        return;
+      }
+      [...bySender.entries()]
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, ANALYZE_TOP_COUNT)
+        .forEach(([address, stats]) => analysisListEl.append(senderRow(address, stats)));
+      setStatus(t('analysisDone', { n: scanned, s: bySender.size }), 'ok');
+    } catch (e) {
+      setStatus(e.message, 'err');
+    } finally {
+      busy = false;
+    }
+  }
+
+  // One clickable result row. Clicking puts the address in the input field,
+  // so the add/remove buttons above immediately show where it can go.
+  function senderRow(address, stats) {
+    const row = el('button', 'pae-sender');
+    row.title = t('analysisUseTitle');
+    row.append(el('span', 'pae-sender-count', String(stats.count)));
+    row.append(el('span', 'pae-sender-addr', address));
+    if (stats.unread) {
+      row.append(el('span', 'pae-sender-unread', t('unreadCount', { u: stats.unread })));
+    }
+    row.addEventListener('click', () => {
+      addressInput.value = address;
+      // Treat it as hand-typed: the auto-follow must not overwrite it.
+      lastAutoFill = null;
+      updateMembership();
+      setStatus('');
+    });
+    return row;
   }
 
   // ---------------------------------------------------------------------
