@@ -167,11 +167,42 @@
     return metas.map((m) => m.ID);
   }
 
-  // Custom folders the user created (Type=3). Returns [{ id, name }].
+  // Custom folders the user created (Type=3). Folders can be nested: ParentID
+  // points at the parent and Path holds the full "Parent/Child" path.
   async function listFolders() {
     const q = new URLSearchParams({ Type: String(CUSTOM_FOLDER_TYPE) });
     const res = await api('GET', `/api/core/v4/labels?${q}`);
-    return (res.Labels || []).map((l) => ({ id: l.ID, name: l.Name }));
+    return (res.Labels || []).map((l) => ({
+      id: l.ID,
+      name: l.Name,
+      parentId: String(l.ParentID || ''),
+      order: l.Order || 0,
+      path: l.Path || l.Name,
+    }));
+  }
+
+  // Flatten the folder tree into display order (each parent directly followed
+  // by its children), recording depth so the picker can indent nesting.
+  function orderFoldersAsTree(folders) {
+    const byParent = new Map();
+    for (const f of folders) {
+      if (!byParent.has(f.parentId)) byParent.set(f.parentId, []);
+      byParent.get(f.parentId).push(f);
+    }
+    for (const list of byParent.values()) list.sort((a, b) => a.order - b.order);
+    const result = [];
+    const walk = (parentId, depth) => {
+      for (const f of byParent.get(parentId) || []) {
+        result.push({ ...f, depth });
+        walk(String(f.id), depth + 1);
+      }
+    };
+    walk('', 0);
+    // Safety net: a folder whose parent was not returned still shows up.
+    for (const f of folders) {
+      if (!result.some((r) => r.id === f.id)) result.push({ ...f, depth: 0 });
+    }
+    return result;
   }
 
   // Move messages into a folder. Folders are exclusive labels, so this also
@@ -1080,9 +1111,13 @@
     archiveBtn.addEventListener('click', () =>
       onPickFolder(entry, days, ARCHIVE_LABEL_ID, t('archiveFolderName')));
     list.append(archiveBtn);
-    for (const f of folders) {
+    for (const f of orderFoldersAsTree(folders)) {
       const btn = el('button', 'pae-btn pae-ghost', f.name);
-      btn.addEventListener('click', () => onPickFolder(entry, days, f.id, f.name));
+      // Indent nested folders so the tree structure is visible.
+      if (f.depth) btn.style.paddingInlineStart = `${10 + f.depth * 16}px`;
+      btn.title = f.path;
+      // Store the full path as the rule's folder name to keep it unambiguous.
+      btn.addEventListener('click', () => onPickFolder(entry, days, f.id, f.path));
       list.append(btn);
     }
     pickerEl.append(list);

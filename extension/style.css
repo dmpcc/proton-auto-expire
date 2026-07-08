@@ -288,12 +288,15 @@
 }
 .pae-offer-text { margin-bottom: 8px; }
 .pae-offer-row { display: flex; gap: 8px; }
-/* Folder picker: a vertical list of destination buttons, then Cancel. */
+/* Folder picker: a vertical list of destination buttons, then Cancel.
+   Long folder lists scroll inside the picker instead of overflowing. */
 .pae-picker-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin-bottom: 8px;
+  max-height: 40vh;
+  overflow-y: auto;
 }
 .pae-picker-list .pae-btn { text-align: left; }
 
