@@ -266,27 +266,48 @@
   // ---------------------------------------------------------------------
   let archiveRules = [];
 
-  // chrome.storage is absent in some contexts (e.g. permission denied); every
-  // archive feature checks this and degrades gracefully.
+  // After the extension is reloaded, an already-open tab keeps running the
+  // old content script as an orphan; its chrome.* calls then throw
+  // "Extension context invalidated". chrome.runtime.id disappears in that
+  // state, so this detects it without triggering the error.
+  function extensionAlive() {
+    try {
+      return typeof chrome !== 'undefined' && !!(chrome.runtime && chrome.runtime.id);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // chrome.storage is absent in some contexts (e.g. permission denied) and
+  // dead in orphaned scripts; every archive feature checks this and degrades
+  // gracefully.
   function storageAvailable() {
-    return typeof chrome !== 'undefined' && chrome.storage && !!chrome.storage.local;
+    return extensionAlive() && !!(chrome.storage && chrome.storage.local);
   }
 
   function storageGet(keys) {
     return new Promise((resolve) => {
-      chrome.storage.local.get(keys, (res) => {
-        void chrome.runtime.lastError; // swallow, treat as empty
-        resolve(res || {});
-      });
+      try {
+        chrome.storage.local.get(keys, (res) => {
+          void chrome.runtime.lastError; // swallow, treat as empty
+          resolve(res || {});
+        });
+      } catch (_) {
+        resolve({}); // orphaned script: behave as if storage were empty
+      }
     });
   }
 
   function storageSet(obj) {
     return new Promise((resolve) => {
-      chrome.storage.local.set(obj, () => {
-        void chrome.runtime.lastError;
-        resolve();
-      });
+      try {
+        chrome.storage.local.set(obj, () => {
+          void chrome.runtime.lastError;
+          resolve();
+        });
+      } catch (_) {
+        resolve(); // orphaned script: drop the write silently
+      }
     });
   }
 
@@ -328,6 +349,12 @@
   // recently. Set opts.rules to sweep a single rule (defaults to all rules).
   async function runSweep(opts = {}) {
     const manual = !!opts.manual;
+    // Orphaned script after an extension reload: stop the timers for good;
+    // refreshing the tab loads the new script.
+    if (!extensionAlive()) {
+      stopSweepSchedule();
+      return;
+    }
     if (!storageAvailable()) {
       if (manual) setStatus(t('storageUnavailable'), 'warn');
       return;
@@ -364,6 +391,17 @@
   function startSweepSchedule() {
     startupSweepTimer = setTimeout(() => runSweep(), SWEEP_STARTUP_DELAY_MS);
     sweepIntervalTimer = setInterval(() => runSweep(), SWEEP_INTERVAL_MS);
+  }
+
+  function stopSweepSchedule() {
+    if (startupSweepTimer) {
+      clearTimeout(startupSweepTimer);
+      startupSweepTimer = null;
+    }
+    if (sweepIntervalTimer) {
+      clearInterval(sweepIntervalTimer);
+      sweepIntervalTimer = null;
+    }
   }
 
   async function initArchive() {
