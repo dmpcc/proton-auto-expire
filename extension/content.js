@@ -32,6 +32,18 @@
   const ALL_MAIL_LABEL_ID = '5';
   const MESSAGES_PAGE_SIZE = 150; // Proton's maximum page size
   const MAX_MESSAGE_PAGES = 20; // safety cap: at most 3000 messages per action
+
+  // Client-side auto-archive rules: folders and sweep scheduling.
+  const INBOX_LABEL_ID = '0'; // Proton's system Inbox label
+  const ARCHIVE_LABEL_ID = '6'; // Proton's system Archive folder
+  const CUSTOM_FOLDER_TYPE = 3; // Type=3 in core/v4/labels lists custom folders
+  const ARCHIVE_RULES_KEY = 'archiveRules'; // key in chrome.storage.local
+  const LAST_SWEEP_KEY = 'lastSweepAt'; // multi-tab double-run guard (ms epoch)
+  // Run a first sweep this long after load, so auth headers can be captured.
+  const SWEEP_STARTUP_DELAY_MS = 20 * 1000;
+  const SWEEP_INTERVAL_MS = 15 * 60 * 1000; // periodic background sweep
+  // Automatic sweeps skip if another tab swept more recently than this.
+  const SWEEP_MIN_GAP_MS = 13 * 60 * 1000;
   // Unanchored: used to find an address inside larger text (sender detection).
   const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
   // Anchored: the typed input must be exactly one address, nothing around it.
@@ -115,16 +127,17 @@
   const createFilter = (Name, Sieve) =>
     api('POST', '/api/mail/v4/filters', { Name, Sieve, Version: FILTER_VERSION });
 
-  // List IDs of all existing messages matching a sieve entry (an address or
-  // a "*@domain" pattern). Proton's From search matches loosely, so the
-  // results are filtered client-side against the actual sender address.
-  async function listMessagesFrom(entry) {
+  // List {ID, Time} of existing messages matching a sieve entry (an address or
+  // a "*@domain" pattern) inside one label. Proton's From search matches
+  // loosely, so results are filtered client-side against the real sender.
+  // Time is the receipt time in unix seconds.
+  async function listMessageMetaFrom(entry, labelId) {
     const searchTerm = entry.startsWith('*@') ? entry.slice(2) : entry;
-    const ids = [];
+    const metas = [];
     for (let page = 0; page < MAX_MESSAGE_PAGES; page++) {
       const q = new URLSearchParams({
         From: searchTerm,
-        LabelID: ALL_MAIL_LABEL_ID,
+        LabelID: labelId,
         Page: String(page),
         PageSize: String(MESSAGES_PAGE_SIZE),
       });
@@ -132,11 +145,36 @@
       const msgs = res.Messages || [];
       for (const m of msgs) {
         const sender = ((m.Sender && m.Sender.Address) || '').toLowerCase();
-        if (entryMatchesAddress(entry, sender)) ids.push(m.ID);
+        if (entryMatchesAddress(entry, sender)) metas.push({ ID: m.ID, Time: m.Time });
       }
       if (msgs.length < MESSAGES_PAGE_SIZE) break;
     }
-    return ids;
+    return metas;
+  }
+
+  // IDs of all existing messages matching an entry, across All mail; used by
+  // the expire flow to apply Proton's self-destruct to existing messages.
+  async function listMessagesFrom(entry) {
+    const metas = await listMessageMetaFrom(entry, ALL_MAIL_LABEL_ID);
+    return metas.map((m) => m.ID);
+  }
+
+  // Custom folders the user created (Type=3). Returns [{ id, name }].
+  async function listFolders() {
+    const q = new URLSearchParams({ Type: String(CUSTOM_FOLDER_TYPE) });
+    const res = await api('GET', `/api/core/v4/labels?${q}`);
+    return (res.Labels || []).map((l) => ({ id: l.ID, name: l.Name }));
+  }
+
+  // Move messages into a folder. Folders are exclusive labels, so this also
+  // removes the message from the inbox. Chunked like expireMessages().
+  async function moveMessagesToFolder(ids, folderId) {
+    for (let i = 0; i < ids.length; i += MESSAGES_PAGE_SIZE) {
+      await api('PUT', '/api/mail/v4/messages/label', {
+        LabelID: folderId,
+        IDs: ids.slice(i, i + MESSAGES_PAGE_SIZE),
+      });
+    }
   }
 
   // Same mechanism as Proton's own "self-destruct in x days": the messages
@@ -149,6 +187,120 @@
         ExpirationTime: expirationTime,
       });
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // Auto-archive rules (client-side, stored in chrome.storage.local)
+  //
+  // Unlike expire filters (server-side sieve), these rules live only in this
+  // browser and are executed by the extension while a Proton Mail tab is open.
+  // A rule: { id, days, folderId, folderName, entries: string[] }.
+  // ---------------------------------------------------------------------
+  let archiveRules = [];
+
+  // chrome.storage is absent in some contexts (e.g. permission denied); every
+  // archive feature checks this and degrades gracefully.
+  function storageAvailable() {
+    return typeof chrome !== 'undefined' && chrome.storage && !!chrome.storage.local;
+  }
+
+  function storageGet(keys) {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(keys, (res) => {
+        void chrome.runtime.lastError; // swallow, treat as empty
+        resolve(res || {});
+      });
+    });
+  }
+
+  function storageSet(obj) {
+    return new Promise((resolve) => {
+      chrome.storage.local.set(obj, () => {
+        void chrome.runtime.lastError;
+        resolve();
+      });
+    });
+  }
+
+  async function loadArchiveRules() {
+    if (!storageAvailable()) return;
+    const res = await storageGet(ARCHIVE_RULES_KEY);
+    archiveRules = Array.isArray(res[ARCHIVE_RULES_KEY]) ? res[ARCHIVE_RULES_KEY] : [];
+  }
+
+  async function saveArchiveRules() {
+    if (!storageAvailable()) return;
+    await storageSet({ [ARCHIVE_RULES_KEY]: archiveRules });
+  }
+
+  // Move inbox messages older than the rule's cutoff into its folder.
+  // Returns the total number of messages moved across all given rules.
+  async function sweepRules(rules) {
+    let moved = 0;
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    for (const rule of rules) {
+      const cutoff = nowSeconds - rule.days * SECONDS_PER_DAY;
+      const idsToMove = [];
+      for (const entry of rule.entries) {
+        const metas = await listMessageMetaFrom(entry, INBOX_LABEL_ID);
+        for (const m of metas) {
+          if (m.Time < cutoff) idsToMove.push(m.ID);
+        }
+      }
+      if (idsToMove.length) {
+        await moveMessagesToFolder(idsToMove, rule.folderId);
+        moved += idsToMove.length;
+      }
+    }
+    return moved;
+  }
+
+  // Orchestrates a sweep. Manual sweeps always run and report status; automatic
+  // sweeps skip silently when there is nothing to do or another tab swept
+  // recently. Set opts.rules to sweep a single rule (defaults to all rules).
+  async function runSweep(opts = {}) {
+    const manual = !!opts.manual;
+    if (!storageAvailable()) {
+      if (manual) setStatus(t('storageUnavailable'), 'warn');
+      return;
+    }
+    if (!auth.uid) return; // startup: auth not captured yet, skip silently
+    const rules = opts.rules || archiveRules;
+    if (!rules.length) {
+      if (manual) setStatus(t('sweptNone'), 'ok');
+      return;
+    }
+    // Multi-tab double-run guard: automatic sweeps back off if another tab
+    // swept recently. Manual sweeps always run.
+    const store = await storageGet(LAST_SWEEP_KEY);
+    const lastSweepAt = store[LAST_SWEEP_KEY] || 0;
+    if (!manual && Date.now() - lastSweepAt < SWEEP_MIN_GAP_MS) return;
+    if (busy) return;
+    busy = true;
+    await storageSet({ [LAST_SWEEP_KEY]: Date.now() }); // claim the slot at start
+    try {
+      setStatus(t('sweeping'));
+      const moved = await sweepRules(rules);
+      setStatus(moved ? t('sweptResult', { n: moved }) : t('sweptNone'), moved ? 'ok' : '');
+    } catch (e) {
+      setStatus(e.message, 'err');
+    } finally {
+      busy = false;
+    }
+  }
+
+  let startupSweepTimer = null;
+  let sweepIntervalTimer = null;
+
+  // Sweeps run while the tab is open, independent of the panel being open.
+  function startSweepSchedule() {
+    startupSweepTimer = setTimeout(() => runSweep(), SWEEP_STARTUP_DELAY_MS);
+    sweepIntervalTimer = setInterval(() => runSweep(), SWEEP_INTERVAL_MS);
+  }
+
+  async function initArchive() {
+    await loadArchiveRules();
+    startSweepSchedule();
   }
 
   // ---------------------------------------------------------------------
@@ -242,18 +394,24 @@
     return n;
   };
 
-  let panel, addressInput, filterListEl, statusEl;
-  let toggleBtn, detectBtn, newBtn, langSelect;
+  let panel, addressInput, filterListEl, statusEl, archiveListEl;
+  let expireHeaderEl, archiveHeaderEl, archiveHintEl;
+  let toggleBtn, detectBtn, newBtn, newRuleBtn, sweepBtn, langSelect;
   let busy = false;
-  // Rendered filter rows, so membership marks can be updated without a reload.
+  // Rendered expire-filter rows, so membership marks update without a reload.
   let rows = [];
+  // Rendered archive-rule rows, same purpose.
+  let archiveRows = [];
   // Last value we auto-filled; lets us tell auto-filled from hand-typed input.
   let lastAutoFill = null;
   let followTimer = null;
   // Inline "apply to existing mail?" prompt, shown after a successful add.
   let offerEl = null;
+  // Inline destination-folder picker, shown while creating an archive rule.
+  let pickerEl = null;
 
   function setStatus(msg, kind = '') {
+    if (!statusEl) return; // sweeps may fire before the panel is built
     statusEl.textContent = msg;
     statusEl.className = 'pae-status' + (kind ? ` pae-${kind}` : '');
   }
@@ -292,12 +450,37 @@
     detectBtn.addEventListener('click', fillSender);
     senderRow.append(addressInput, detectBtn);
 
+    // Scrollable body holds both sections; the language select stays in the
+    // fixed footer.
+    const body = el('div', 'pae-body');
+
+    // Auto-expire (server-side sieve filters).
+    expireHeaderEl = el('div', 'pae-section');
     filterListEl = el('div', 'pae-filters');
+    newBtn = el('button', 'pae-btn pae-ghost');
+    newBtn.addEventListener('click', onCreateFilter);
+    const newFilterRow = el('div', 'pae-section-actions');
+    newFilterRow.append(newBtn);
+
+    // Auto-archive (client-side rules).
+    archiveHeaderEl = el('div', 'pae-section');
+    archiveHintEl = el('div', 'pae-hint');
+    archiveListEl = el('div', 'pae-filters');
+    newRuleBtn = el('button', 'pae-btn pae-ghost');
+    newRuleBtn.addEventListener('click', onCreateRule);
+    sweepBtn = el('button', 'pae-btn pae-ghost');
+    sweepBtn.addEventListener('click', () => runSweep({ manual: true }));
+    const archiveActions = el('div', 'pae-section-actions');
+    archiveActions.append(newRuleBtn, sweepBtn);
+
+    body.append(
+      expireHeaderEl, filterListEl, newFilterRow,
+      archiveHeaderEl, archiveHintEl, archiveListEl, archiveActions
+    );
+
     statusEl = el('div', 'pae-status');
 
     const foot = el('footer', 'pae-foot');
-    newBtn = el('button', 'pae-btn pae-ghost');
-    newBtn.addEventListener('click', onCreateFilter);
     langSelect = el('select', 'pae-lang');
     PAE_I18N.LANGUAGES.forEach(({ code, name }) => {
       const option = el('option', null, name);
@@ -306,11 +489,12 @@
       langSelect.append(option);
     });
     langSelect.addEventListener('change', onLanguageChange);
-    foot.append(newBtn, langSelect);
+    foot.append(langSelect);
 
-    panel.append(head, senderRow, filterListEl, statusEl, foot);
+    panel.append(head, senderRow, body, statusEl, foot);
     document.body.append(toggleBtn, panel);
     applyStaticTexts();
+    initArchive();
   }
 
   // Set every fixed label in the current language; called on build and on
@@ -321,6 +505,11 @@
     detectBtn.textContent = `↻ ${t('detectBtn')}`;
     detectBtn.title = t('detectTitle');
     newBtn.textContent = t('newFilterBtn');
+    expireHeaderEl.textContent = t('expireSection');
+    archiveHeaderEl.textContent = t('archiveSection');
+    archiveHintEl.textContent = t('archiveHint');
+    newRuleBtn.textContent = t('newRuleBtn');
+    sweepBtn.textContent = t('sweepBtn');
     langSelect.title = t('langTitle');
     panel.dir = PAE_I18N.isRTL() ? 'rtl' : 'ltr';
   }
@@ -329,8 +518,12 @@
     PAE_I18N.setLang(langSelect.value);
     applyStaticTexts();
     hideOffer();
+    hidePicker();
     setStatus('');
-    if (panel.classList.contains('pae-open')) renderFilters();
+    if (panel.classList.contains('pae-open')) {
+      renderFilters();
+      renderArchiveRules();
+    }
   }
 
   function fillSender() {
@@ -377,8 +570,12 @@
 
   async function onOpen() {
     hideOffer();
+    hidePicker();
     fillSender();
     await renderFilters();
+    // Reload rules so changes made in another tab are reflected.
+    await loadArchiveRules();
+    renderArchiveRules();
   }
 
   // -------------------------------------------------------------------
@@ -388,6 +585,13 @@
     if (offerEl) {
       offerEl.remove();
       offerEl = null;
+    }
+  }
+
+  function hidePicker() {
+    if (pickerEl) {
+      pickerEl.remove();
+      pickerEl = null;
     }
   }
 
@@ -495,6 +699,15 @@
       actionBtn.classList.toggle('pae-del', present);
       actionBtn.classList.toggle('pae-add', !present);
       actionBtn.title = present ? t('presentTitle') : t('addTitle', { d: parsed.days });
+    }
+    for (const { rule, actionBtn } of archiveRows) {
+      const present = entry != null && rule.entries.includes(entry);
+      actionBtn.textContent = present ? t('removeBtn') : t('addBtn');
+      actionBtn.classList.toggle('pae-del', present);
+      actionBtn.classList.toggle('pae-add', !present);
+      actionBtn.title = present
+        ? t('presentTitle')
+        : t('archiveAddTitle', { folder: rule.folderName, d: rule.days });
     }
   }
 
@@ -613,6 +826,177 @@
     } finally {
       busy = false;
     }
+  }
+
+  // ---------------------------------------------------------------------
+  // Auto-archive UI
+  // ---------------------------------------------------------------------
+  function renderArchiveRules() {
+    archiveListEl.textContent = '';
+    archiveRows = [];
+    if (!storageAvailable()) {
+      archiveListEl.append(el('div', 'pae-empty', t('storageUnavailable')));
+      return;
+    }
+    archiveRules
+      .slice()
+      .sort((a, b) => a.days - b.days)
+      .forEach((rule) => archiveListEl.append(archiveRow(rule)));
+    updateMembership();
+  }
+
+  function archiveRow(rule) {
+    const row = el('div', 'pae-filter');
+
+    const main = el('div', 'pae-filter-main');
+    const label = el('button', 'pae-filter-label');
+    label.append(
+      el('span', 'pae-days', t('daysShort', { d: rule.days })),
+      el('span', 'pae-name', `→ ${rule.folderName}`),
+      el('span', 'pae-count', `${rule.entries.length}`)
+    );
+    // Same adaptive button as expire rows: "add" normally, "remove" when the
+    // input entry is already in this rule.
+    const actionBtn = el('button', 'pae-btn pae-add', t('addBtn'));
+    actionBtn.addEventListener('click', () => {
+      const entry = normalizeEntry(addressInput.value);
+      if (entry && rule.entries.includes(entry)) {
+        onArchiveRemove(rule, entry);
+      } else {
+        onArchiveAdd(rule);
+      }
+    });
+    main.append(label, actionBtn);
+    archiveRows.push({ rule, actionBtn });
+
+    const details = el('div', 'pae-addresses');
+    rule.entries.forEach((e) => {
+      const item = el('div', 'pae-address');
+      item.append(el('span', null, e));
+      const rm = el('button', 'pae-rm', '×');
+      rm.title = t('removeEntryTitle');
+      rm.addEventListener('click', () => onArchiveRemove(rule, e));
+      item.append(rm);
+      details.append(item);
+    });
+    label.addEventListener('click', () => details.classList.toggle('pae-show'));
+
+    row.append(main, details);
+    return row;
+  }
+
+  async function onArchiveAdd(rule) {
+    if (!storageAvailable()) {
+      setStatus(t('storageUnavailable'), 'warn');
+      return;
+    }
+    const entry = normalizeEntry(addressInput.value);
+    if (!entry) {
+      setStatus(t('invalidEntry'), 'warn');
+      return;
+    }
+    if (rule.entries.includes(entry)) {
+      setStatus(t('alreadyIn', { entry, name: rule.folderName }), 'warn');
+      return;
+    }
+    rule.entries.push(entry);
+    await saveArchiveRules();
+    renderArchiveRules();
+    // Moves are reversible, so sweep this rule right away without confirming.
+    runSweep({ manual: true, rules: [rule] });
+  }
+
+  async function onArchiveRemove(rule, entry) {
+    if (!storageAvailable()) {
+      setStatus(t('storageUnavailable'), 'warn');
+      return;
+    }
+    rule.entries = rule.entries.filter((e) => e !== entry);
+    if (!rule.entries.length) {
+      // Removing the last entry deletes the whole rule.
+      archiveRules = archiveRules.filter((r) => r.id !== rule.id);
+      await saveArchiveRules();
+      renderArchiveRules();
+      setStatus(t('ruleDeleted'), 'ok');
+      return;
+    }
+    await saveArchiveRules();
+    renderArchiveRules();
+    setStatus(t('removedOk', { entry, name: rule.folderName }), 'ok');
+  }
+
+  async function onCreateRule() {
+    if (!storageAvailable()) {
+      setStatus(t('storageUnavailable'), 'warn');
+      return;
+    }
+    const entry = normalizeEntry(addressInput.value);
+    if (!entry) {
+      setStatus(t('createNeedsEntry'), 'warn');
+      return;
+    }
+    const daysStr = prompt(t('promptArchiveDays'), '7');
+    if (!daysStr) return;
+    const days = parseInt(daysStr, 10);
+    if (!Number.isInteger(days) || days < 1) {
+      setStatus(t('invalidDays'), 'warn');
+      return;
+    }
+    if (busy) return;
+    busy = true;
+    let folders = [];
+    try {
+      folders = await listFolders();
+    } catch (e) {
+      setStatus(e.message, 'err');
+      busy = false;
+      return;
+    }
+    busy = false;
+    showFolderPicker(entry, days, folders);
+  }
+
+  // Inline destination-folder picker, styled like the expire "offer" block.
+  // System Archive is always offered first, then the user's custom folders.
+  function showFolderPicker(entry, days, folders) {
+    hidePicker();
+    pickerEl = el('div', 'pae-offer');
+    pickerEl.append(el('div', 'pae-offer-text', t('pickFolder')));
+    if (!folders.length) {
+      pickerEl.append(el('div', 'pae-hint', t('noFolders')));
+    }
+    const list = el('div', 'pae-picker-list');
+    const archiveBtn = el('button', 'pae-btn pae-ghost', t('archiveFolderName'));
+    archiveBtn.addEventListener('click', () =>
+      onPickFolder(entry, days, ARCHIVE_LABEL_ID, t('archiveFolderName')));
+    list.append(archiveBtn);
+    for (const f of folders) {
+      const btn = el('button', 'pae-btn pae-ghost', f.name);
+      btn.addEventListener('click', () => onPickFolder(entry, days, f.id, f.name));
+      list.append(btn);
+    }
+    pickerEl.append(list);
+    const cancel = el('button', 'pae-btn pae-ghost', t('cancelBtn'));
+    cancel.addEventListener('click', hidePicker);
+    pickerEl.append(cancel);
+    panel.insertBefore(pickerEl, statusEl);
+  }
+
+  async function onPickFolder(entry, days, folderId, folderName) {
+    hidePicker();
+    const rule = {
+      id: crypto.randomUUID(),
+      days,
+      folderId,
+      folderName,
+      entries: [entry],
+    };
+    archiveRules.push(rule);
+    await saveArchiveRules();
+    renderArchiveRules();
+    setStatus(t('ruleCreated', { d: days, folder: folderName }), 'ok');
+    // Apply the new rule to existing inbox mail immediately.
+    runSweep({ manual: true, rules: [rule] });
   }
 
   // ---------------------------------------------------------------------

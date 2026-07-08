@@ -10,7 +10,7 @@ Chromium browser extension (MV3, loaded "unpacked" in Vivaldi) that adds a sideb
   - `manifest.json` — MV3; toolbar action, background service worker, and content scripts on `https://mail.proton.me/*`
   - `inject.js` — runs in the page context (`world: MAIN`), captures the `x-pm-uid` and `x-pm-appversion` headers from Proton's own fetch calls
   - `i18n.js` — all UI strings (21 languages) plus the language preference; loaded before `content.js` in the same isolated world. Menu order is European languages first, large non-European languages last
-  - `content.js` — all logic: API calls, sieve parsing/rewriting, sidebar UI
+  - `content.js` — all logic: API calls, sieve parsing/rewriting, sidebar UI, and the client-side auto-archive rules (storage + sweep)
   - `background.js` — toolbar icon click: toggles the sidebar on a Proton Mail tab, opens Proton Mail elsewhere
   - `style.css` — sidebar styling
 - `assets/icon.svg` — source for the toolbar icons (Proton-purple squircle with a white hourglass). Regenerate the PNGs after editing it: `magick -background none assets/icon.svg -resize 128x128 -depth 8 PNG32:extension/icon128.png` (and `48x48` for `icon48.png`).
@@ -24,6 +24,7 @@ Chromium browser extension (MV3, loaded "unpacked" in Vivaldi) that adds a sideb
 3. **Sieve parsing expects a specific template**: exactly one `if address :is/:matches "from" [ ... ]` block with an `expire "day" "N"` action. The regexes live in `content.js` (`LIST_RE`, `DAYS_RE`). More complex sieves are deliberately skipped. When writing, `:is` is always converted to `:matches` so that domain patterns (`*@site.com`) work; behavior for exact addresses is identical.
 4. **Sender detection is DOM-based** (`detectSender()` in `content.js`). The opened message's sender carries `data-testid="recipients:sender"`; do NOT use `message-column:sender-address`, which lives on message LIST rows and returns the wrong sender. The message container exposes `data-message-id`.
 5. **All UI strings live in `i18n.js`.** When adding a string, add the key to every language block; a completeness check is trivial in Node (compare key sets against `en`). Arabic and Urdu are RTL; the panel flips `dir` automatically.
+6. **Auto-archive rules are client-side.** Unlike expire filters (server-side sieve), archive rules live only in this browser in `chrome.storage.local` under the key `archiveRules` (shape `{ id, days, folderId, folderName, entries[] }`). The extension executes them itself: a "sweep" queries the **inbox only** (LabelID `0`) for mail older than `days` and moves it via `PUT /api/mail/v4/messages/label` (`{ LabelID, IDs }`). Destination folders come from `GET /api/core/v4/labels?Type=3`; the system Archive folder is LabelID `6`. Sweeps run ~20s after load, every 15 min, on the "Clean up now" button, and right after an entry is added; a `lastSweepAt` timestamp in storage guards against multiple tabs double-sweeping. All `chrome.storage` use is guarded (feature degrades with `storageUnavailable` if it is missing).
 
 ## Maintenance playbook
 

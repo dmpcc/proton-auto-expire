@@ -128,11 +128,40 @@
 }
 .pae-del:hover { filter: brightness(1.15); }
 
-.pae-filters {
+/* Scrollable body holds both the auto-expire and auto-archive sections. */
+.pae-body {
   flex: 1;
   overflow-y: auto;
-  padding: 6px 0;
 }
+
+/* Section header, matching the .pae-title look (uppercase, dim, small). */
+.pae-section {
+  padding: 12px 14px 4px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: var(--pae-dim);
+  border-top: 1px solid var(--pae-line);
+}
+.pae-body > .pae-section:first-child { border-top: none; }
+
+/* Small always-visible hint under the archive header. */
+.pae-hint {
+  padding: 0 14px 6px;
+  font-size: 11px;
+  color: var(--pae-dim);
+  font-style: italic;
+}
+
+/* Row holding a section's action buttons (new filter / new rule / clean up). */
+.pae-section-actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 14px 10px;
+}
+
+.pae-filters { padding: 2px 0; }
 .pae-filter { border-bottom: 1px solid var(--pae-line); }
 .pae-filter-main {
   display: flex;
@@ -210,6 +239,14 @@
 }
 .pae-offer-text { margin-bottom: 8px; }
 .pae-offer-row { display: flex; gap: 8px; }
+/* Folder picker: a vertical list of destination buttons, then Cancel. */
+.pae-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.pae-picker-list .pae-btn { text-align: left; }
 
 .pae-status {
   min-height: 20px;

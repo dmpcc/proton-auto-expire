@@ -29,6 +29,22 @@ After a code change: click the reload button next to the extension on `vivaldi:/
 
 Every change is validated through Proton's own sieve check endpoint before it is saved.
 
+### Auto-archive (move to a folder)
+
+The sidebar has a second, clearly separated section: **Auto-archive**. Instead of *deleting* mail, an auto-archive rule *moves* mail from a sender/domain to a folder of your choice after N days (for example: move newsletters to an "Old newsletters" folder after 7 days).
+
+Auto-archive works differently from auto-expire. Auto-expire is a **server-side** sieve filter that Proton runs for you. Auto-archive is **client-side**: the rules are stored in this browser and are executed by the extension itself, but only while a Proton Mail tab is open. The section shows a small always-visible hint reminding you of this.
+
+1. Type or pick a sender/domain in the address field (same as for auto-expire).
+2. Click **+ new archive rule**. The extension asks after how many days to move the mail, then shows an inline list of destination folders: the system **Archive** folder first, followed by your own custom folders. Pick one.
+3. The rule is created and immediately applied to matching mail already in your inbox that is old enough. Because moving is reversible, no confirmation is asked.
+4. Archive rule rows work like filter rows: click the name to expand the entry list, use the adaptive **Add**/**Remove** button for the current address, and the **×** to remove a single entry. Removing the last entry deletes the whole rule.
+5. **Clean up now** runs a sweep of all archive rules on demand. The extension also sweeps automatically about 20 seconds after the page loads and then every 15 minutes while the tab is open. Only the inbox is swept; mail already filed elsewhere is left alone.
+
+Rules are stored per browser (in `chrome.storage.local`), so they do not sync between devices.
+
+**Recommended combination:** an auto-archive rule (e.g. move to a folder after 7 days) works well together with an auto-expire filter (e.g. delete after 60 days) for the same sender. Proton sets a message's expiration at delivery and it travels with the message, so a mail that is later moved to a folder by auto-archive still expires on schedule.
+
 ## How it works technically
 
 - `inject.js` runs in the page context and captures the `x-pm-uid` and `x-pm-appversion` headers from Proton's own fetch calls. The extension stores **no** passwords or tokens; the (httpOnly) session cookie is sent automatically by the browser because all calls are same-origin.
@@ -40,6 +56,8 @@ Every change is validated through Proton's own sieve check endpoint before it is
   - `POST /api/mail/v4/filters` — create a filter
   - `GET /api/mail/v4/messages` — look up existing mail from a sender
   - `PUT /api/mail/v4/messages/expire` — set an expiration date on existing messages (Proton's "self-destruct")
+  - `GET /api/core/v4/labels?Type=3` — list the user's custom folders (auto-archive destinations)
+  - `PUT /api/mail/v4/messages/label` — move messages into a folder (auto-archive)
 - `background.js` handles the toolbar icon: it toggles the sidebar on a Proton Mail tab and opens Proton Mail from anywhere else.
 - Endpoints and `FILTER_VERSION = 2` come from Proton's open-source client code: `github.com/ProtonMail/WebClients`, `packages/shared/lib/api/filters.ts` and `packages/components/containers/filters/constants.ts`.
 
@@ -48,6 +66,7 @@ Every change is validated through Proton's own sieve check endpoint before it is
 - **Unofficial API.** Proton does not document this API for third parties and can change it without notice. If things suddenly stop working: check in DevTools (Network tab on mail.proton.me → open the Filters page) whether the paths/fields still match.
 - **Sender detection is DOM-based** and can break when Proton updates its UI. There are fallback selectors plus a manual input field, so you can always continue.
 - **Sieve parsing expects the template**: one `if address :is/:matches "from" [ ... ]` block per filter. More complex sieve scripts (multiple blocks, `anyof`, etc.) are skipped, or only the first block is edited. On first modification the extension converts a filter from `:is` to `:matches` (needed for domain patterns; behaves identically for plain addresses).
+- **Auto-archive is client-side.** Unlike auto-expire (a server-side sieve filter), auto-archive rules are executed by the extension itself and only run while a Proton Mail tab is open in this browser. The rules are stored per browser (`chrome.storage.local`) and do not sync between devices. If no Proton Mail tab is open, no mail is moved until one is opened again.
 - The extension works on `mail.proton.me`; the filter page on `account.proton.me` does not need it but only shows changes after a refresh.
 - The sieve parsing/rewriting logic is tested locally; the API calls cannot be tested automatically without an account session. First time: try a single test address and verify the result in Proton Settings → Filters → Edit Sieve.
 
