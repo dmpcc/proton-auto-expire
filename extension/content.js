@@ -695,8 +695,8 @@
     hideOffer();
     hidePicker();
     setStatus('');
-    // Analysis results contain per-row translated labels; clear the snapshot.
-    analysisListEl.textContent = '';
+    // Analysis rows contain translated labels; re-render them from the cache.
+    renderAnalysis();
     if (panel.classList.contains('pae-open')) {
       renderFilters();
       renderArchiveRules();
@@ -748,8 +748,9 @@
   async function onOpen() {
     hideOffer();
     hidePicker();
-    // The analysis is a snapshot; start each panel session fresh.
-    analysisListEl.textContent = '';
+    // Keep the last analysis visible: closing the panel (it can cover mail
+    // content) must not force a rescan.
+    renderAnalysis();
     fillSender();
     await renderFilters();
     // Reload rules so changes made in another tab are reflected.
@@ -1185,6 +1186,10 @@
   // ---------------------------------------------------------------------
   // Inbox analysis UI
   // ---------------------------------------------------------------------
+  // Last scan result; kept for the lifetime of the tab so closing and
+  // reopening the panel does not force a rescan. Reset only by a page reload.
+  let lastAnalysis = null;
+
   async function onAnalyzeInbox() {
     if (busy) return;
     busy = true;
@@ -1193,19 +1198,31 @@
       const { bySender, scanned } = await scanInboxSenders((n) =>
         setStatus(t('analyzing', { n })));
       if (!scanned) {
+        lastAnalysis = null;
         setStatus(t('analysisEmpty'), 'warn');
         return;
       }
-      [...bySender.entries()]
-        .sort((a, b) => b[1].count - a[1].count)
-        .slice(0, ANALYZE_TOP_COUNT)
-        .forEach(([address, stats]) => analysisListEl.append(senderRow(address, stats)));
+      lastAnalysis = {
+        top: [...bySender.entries()]
+          .sort((a, b) => b[1].count - a[1].count)
+          .slice(0, ANALYZE_TOP_COUNT),
+      };
+      renderAnalysis();
       setStatus(t('analysisDone', { n: scanned, s: bySender.size }), 'ok');
     } catch (e) {
       setStatus(e.message, 'err');
     } finally {
       busy = false;
     }
+  }
+
+  // (Re)render the cached scan result, e.g. after reopening the panel or
+  // switching language (rows contain translated labels).
+  function renderAnalysis() {
+    analysisListEl.textContent = '';
+    if (!lastAnalysis) return;
+    lastAnalysis.top.forEach(([address, stats]) =>
+      analysisListEl.append(senderRow(address, stats)));
   }
 
   // One clickable result row. Clicking puts the address in the input field,
@@ -1224,12 +1241,21 @@
       lastAutoFill = null;
       updateMembership();
       setStatus('');
-      // Also search this sender in Proton itself, so the actual mails are
-      // visible next to the panel. Proton reads search parameters from the
-      // URL hash (extractSearchParameters in mailboxUrl.ts upstream).
-      window.location.hash = `from=${encodeURIComponent(address)}`;
+      openInboxSearch(address);
     });
     return row;
+  }
+
+  // Show this sender's inbox mail using Proton's own URL-driven search
+  // (extractSearchParameters in mailboxUrl.ts upstream reads the hash).
+  // Always jump to the inbox route first: a bare hash change keeps the
+  // search scoped to whatever folder happens to be open, which finds nothing.
+  function openInboxSearch(address) {
+    const user = window.location.pathname.match(/^\/u\/\d+/);
+    const path = `${user ? user[0] : ''}/inbox#from=${encodeURIComponent(address)}`;
+    window.history.pushState({}, '', path);
+    // Proton's router listens for popstate; pushState alone does not emit one.
+    window.dispatchEvent(new PopStateEvent('popstate'));
   }
 
   // ---------------------------------------------------------------------

@@ -51,7 +51,7 @@ The third section, **Inbox analysis**, answers "which senders flood my inbox?" s
 
 Click **Analyze inbox** and the extension pages through your inbox metadata (sender, date and unread flag only — never message content; capped at 3000 messages) and shows the top 15 senders by message count, each with how many of those messages are unread. A high unread count is the strongest signal that you never read that sender and should filter it.
 
-Clicking a result puts that address in the input field **and searches that sender in Proton Mail itself** (via the URL search parameters Proton's own search uses), so the actual messages appear next to the panel while the Add/Remove buttons show at a glance which expire filters and archive rules the address already belongs to. The results are a snapshot: they disappear when the panel is reopened and are never stored.
+Clicking a result puts that address in the input field **and searches that sender's mail in your inbox** (the extension jumps to the inbox route first — a search from within an open folder would stay scoped to that folder and find nothing — and then uses the URL search parameters Proton's own search reads). The Add/Remove buttons meanwhile show at a glance which expire filters and archive rules the address already belongs to. Results stay available while the tab is open, including after closing and reopening the panel; they are never stored and reset on a page reload.
 
 All three sections (auto-expire, auto-archive, inbox analysis) can be collapsed and expanded by clicking their header; the state is remembered per browser, so the sidebar stays as compact as you left it.
 
