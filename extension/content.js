@@ -44,6 +44,9 @@
   const SWEEP_INTERVAL_MS = 15 * 60 * 1000; // periodic background sweep
   // Automatic sweeps skip if another tab swept more recently than this.
   const SWEEP_MIN_GAP_MS = 13 * 60 * 1000;
+  // Success feedback (green tick, ok status) lingers this long, then fades.
+  const FEEDBACK_FADE_DELAY_MS = 5000;
+  const FEEDBACK_REMOVE_MS = FEEDBACK_FADE_DELAY_MS + 800; // after the fade
   // Unanchored: used to find an address inside larger text (sender detection).
   const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
   // Anchored: the typed input must be exactly one address, nothing around it.
@@ -110,7 +113,10 @@
     });
     let json = null;
     try { json = await res.json(); } catch (_) { /* ignore */ }
-    if (!res.ok || (json && json.Code && json.Code !== 1000)) {
+    // Proton returns Code 1000 for single operations and 1001 for successful
+    // batch operations (e.g. messages/expire, messages/label).
+    const codeOk = !json || !json.Code || json.Code === 1000 || json.Code === 1001;
+    if (!res.ok || !codeOk) {
       const msg = (json && (json.Error || json.error)) || `HTTP ${res.status}`;
       throw new Error(`Proton API: ${msg}`);
     }
@@ -282,8 +288,10 @@
       setStatus(t('sweeping'));
       const moved = await sweepRules(rules);
       setStatus(moved ? t('sweptResult', { n: moved }) : t('sweptNone'), moved ? 'ok' : '');
+      return moved;
     } catch (e) {
       setStatus(e.message, 'err');
+      return undefined;
     } finally {
       busy = false;
     }
@@ -410,11 +418,39 @@
   // Inline destination-folder picker, shown while creating an archive rule.
   let pickerEl = null;
 
+  let statusFadeTimer = null;
+
   function setStatus(msg, kind = '') {
     if (!statusEl) return; // sweeps may fire before the panel is built
+    if (statusFadeTimer) {
+      clearTimeout(statusFadeTimer);
+      statusFadeTimer = null;
+    }
     statusEl.textContent = msg;
     statusEl.className = 'pae-status' + (kind ? ` pae-${kind}` : '');
+    // Success messages fade out by themselves; warnings and errors stay.
+    if (kind === 'ok') {
+      statusFadeTimer = setTimeout(() => {
+        statusEl.classList.add('pae-fade-out');
+      }, FEEDBACK_FADE_DELAY_MS);
+    }
   }
+
+  // Transient green tick next to an action button: visible for a few seconds,
+  // then fades out and is removed.
+  function flashTick(btn) {
+    if (!btn) return;
+    const tick = el('span', 'pae-tick', '✔');
+    btn.after(tick);
+    setTimeout(() => tick.classList.add('pae-fade-out'), FEEDBACK_FADE_DELAY_MS);
+    setTimeout(() => tick.remove(), FEEDBACK_REMOVE_MS);
+  }
+
+  // Rows are rebuilt after every change, so look the fresh button up by ID.
+  const filterRowBtn = (filterId) =>
+    (rows.find((r) => r.filter.ID === filterId) || {}).actionBtn;
+  const ruleRowBtn = (ruleId) =>
+    (archiveRows.find((r) => r.rule.id === ruleId) || {}).actionBtn;
 
   function togglePanel() {
     panel.classList.toggle('pae-open');
@@ -469,7 +505,10 @@
     newRuleBtn = el('button', 'pae-btn pae-ghost');
     newRuleBtn.addEventListener('click', onCreateRule);
     sweepBtn = el('button', 'pae-btn pae-ghost');
-    sweepBtn.addEventListener('click', () => runSweep({ manual: true }));
+    sweepBtn.addEventListener('click', async () => {
+      const moved = await runSweep({ manual: true });
+      if (typeof moved === 'number') flashTick(sweepBtn);
+    });
     const archiveActions = el('div', 'pae-section-actions');
     archiveActions.append(newRuleBtn, sweepBtn);
 
@@ -733,7 +772,7 @@
       }
     });
     main.append(label, actionBtn);
-    rows.push({ parsed, actionBtn });
+    rows.push({ filter, parsed, actionBtn });
 
     const details = el('div', 'pae-addresses');
     parsed.addresses.forEach((a) => {
@@ -782,8 +821,11 @@
     }
     const newSieve = sieveWithAddresses(filter.Sieve, [...parsed.addresses, entry]);
     const saved = await saveSieve(filter, newSieve, t('addedOk', { entry, d: parsed.days }));
-    // The filter only affects incoming mail; offer to expire existing mail too.
-    if (saved) showExpireOffer(entry, parsed.days);
+    if (saved) {
+      flashTick(filterRowBtn(filter.ID));
+      // The filter only affects incoming mail; offer to expire existing mail too.
+      showExpireOffer(entry, parsed.days);
+    }
   }
 
   async function onRemove(filter, parsed, addr) {
@@ -793,7 +835,8 @@
       return;
     }
     const newSieve = sieveWithAddresses(filter.Sieve, remaining);
-    await saveSieve(filter, newSieve, t('removedOk', { entry: addr, name: filter.Name }));
+    const saved = await saveSieve(filter, newSieve, t('removedOk', { entry: addr, name: filter.Name }));
+    if (saved) flashTick(filterRowBtn(filter.ID));
   }
 
   async function onCreateFilter() {
@@ -902,6 +945,7 @@
     rule.entries.push(entry);
     await saveArchiveRules();
     renderArchiveRules();
+    flashTick(ruleRowBtn(rule.id));
     // Moves are reversible, so sweep this rule right away without confirming.
     runSweep({ manual: true, rules: [rule] });
   }
@@ -923,6 +967,7 @@
     await saveArchiveRules();
     renderArchiveRules();
     setStatus(t('removedOk', { entry, name: rule.folderName }), 'ok');
+    flashTick(ruleRowBtn(rule.id));
   }
 
   async function onCreateRule() {
@@ -995,6 +1040,7 @@
     await saveArchiveRules();
     renderArchiveRules();
     setStatus(t('ruleCreated', { d: days, folder: folderName }), 'ok');
+    flashTick(ruleRowBtn(rule.id));
     // Apply the new rule to existing inbox mail immediately.
     runSweep({ manual: true, rules: [rule] });
   }

@@ -253,7 +253,22 @@
   padding: 8px 14px;
   font-size: 12px;
   color: var(--pae-dim);
+  opacity: 1;
+  transition: opacity 0.8s ease;
 }
+
+/* Transient success tick next to an action button. */
+.pae-tick {
+  flex: none;
+  color: var(--pae-ok);
+  font-weight: 700;
+  margin-inline-start: 6px;
+  opacity: 1;
+  transition: opacity 0.8s ease;
+}
+
+/* Fades success feedback (status line and ticks) after a short linger. */
+.pae-fade-out { opacity: 0; }
 .pae-ok { color: var(--pae-ok); }
 .pae-warn { color: var(--pae-warn); }
 .pae-err { color: var(--pae-err); }
