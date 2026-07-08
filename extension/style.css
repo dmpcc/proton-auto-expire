@@ -134,17 +134,29 @@
   overflow-y: auto;
 }
 
-/* Section header, matching the .pae-title look (uppercase, dim, small). */
+/* Section header: a full-width button (click collapses/expands the section),
+   matching the .pae-title look (uppercase, dim, small). */
 .pae-section {
+  display: block;
+  width: 100%;
   padding: 12px 14px 4px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--pae-line);
+  font: inherit;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   font-size: 11px;
   color: var(--pae-dim);
-  border-top: 1px solid var(--pae-line);
+  text-align: start;
+  cursor: pointer;
 }
+.pae-section:hover { color: var(--pae-text); }
 .pae-body > .pae-section:first-child { border-top: none; }
+
+.pae-section-body {}
+.pae-hidden { display: none; }
 
 /* Small always-visible hint under the archive header. */
 .pae-hint {

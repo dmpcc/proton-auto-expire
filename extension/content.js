@@ -447,6 +447,40 @@
   // Inline destination-folder picker, shown while creating an archive rule.
   let pickerEl = null;
 
+  // Collapsible sections: state is persisted per browser in localStorage so
+  // the sidebar stays as compact as the user left it.
+  const SECTION_LABELS = {
+    expire: 'expireSection',
+    archive: 'archiveSection',
+    analyze: 'analyzeSection',
+  };
+  const COLLAPSED_KEY = 'pae-collapsed';
+  let collapsed = {};
+  try {
+    collapsed = JSON.parse(localStorage.getItem(COLLAPSED_KEY)) || {};
+  } catch (_) {
+    collapsed = {};
+  }
+  const sectionHeaders = {};
+  const sectionBodies = {};
+
+  function toggleSection(key) {
+    collapsed[key] = !collapsed[key];
+    try {
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(collapsed));
+    } catch (_) { /* ignore */ }
+    applySectionState();
+  }
+
+  function applySectionState() {
+    for (const key of Object.keys(SECTION_LABELS)) {
+      const isCollapsed = !!collapsed[key];
+      sectionHeaders[key].textContent =
+        `${isCollapsed ? '▸' : '▾'} ${t(SECTION_LABELS[key])}`;
+      sectionBodies[key].classList.toggle('pae-hidden', isCollapsed);
+    }
+  }
+
   let statusFadeTimer = null;
 
   function setStatus(msg, kind = '') {
@@ -500,12 +534,25 @@
     detectBtn.addEventListener('click', fillSender);
     senderRow.append(addressInput, detectBtn);
 
-    // Scrollable body holds both sections; the language select stays in the
-    // fixed footer.
+    // Scrollable body holds the sections; the language select stays in the
+    // fixed footer. Each section is a clickable header plus a collapsible body.
     const body = el('div', 'pae-body');
 
+    const sectionHeader = (key) => {
+      const btn = el('button', 'pae-section');
+      btn.addEventListener('click', () => toggleSection(key));
+      sectionHeaders[key] = btn;
+      return btn;
+    };
+    const sectionBody = (key, ...children) => {
+      const wrap = el('div', 'pae-section-body');
+      wrap.append(...children);
+      sectionBodies[key] = wrap;
+      return wrap;
+    };
+
     // Auto-expire (server-side sieve filters).
-    expireHeaderEl = el('div', 'pae-section');
+    expireHeaderEl = sectionHeader('expire');
     filterListEl = el('div', 'pae-filters');
     newBtn = el('button', 'pae-btn pae-ghost');
     newBtn.addEventListener('click', onCreateFilter);
@@ -513,7 +560,7 @@
     newFilterRow.append(newBtn);
 
     // Auto-archive (client-side rules).
-    archiveHeaderEl = el('div', 'pae-section');
+    archiveHeaderEl = sectionHeader('archive');
     archiveHintEl = el('div', 'pae-hint');
     archiveListEl = el('div', 'pae-filters');
     newRuleBtn = el('button', 'pae-btn pae-ghost');
@@ -524,7 +571,7 @@
     archiveActions.append(newRuleBtn, sweepBtn);
 
     // Inbox analysis (on-demand snapshot of the busiest senders).
-    analyzeHeaderEl = el('div', 'pae-section');
+    analyzeHeaderEl = sectionHeader('analyze');
     analyzeBtn = el('button', 'pae-btn pae-ghost');
     analyzeBtn.addEventListener('click', onAnalyzeInbox);
     const analyzeActions = el('div', 'pae-section-actions');
@@ -532,9 +579,9 @@
     analysisListEl = el('div', 'pae-filters');
 
     body.append(
-      expireHeaderEl, filterListEl, newFilterRow,
-      archiveHeaderEl, archiveHintEl, archiveListEl, archiveActions,
-      analyzeHeaderEl, analyzeActions, analysisListEl
+      expireHeaderEl, sectionBody('expire', filterListEl, newFilterRow),
+      archiveHeaderEl, sectionBody('archive', archiveHintEl, archiveListEl, archiveActions),
+      analyzeHeaderEl, sectionBody('analyze', analyzeActions, analysisListEl)
     );
 
     statusEl = el('div', 'pae-status');
@@ -564,15 +611,13 @@
     detectBtn.textContent = `↻ ${t('detectBtn')}`;
     detectBtn.title = t('detectTitle');
     newBtn.textContent = t('newFilterBtn');
-    expireHeaderEl.textContent = t('expireSection');
-    archiveHeaderEl.textContent = t('archiveSection');
     archiveHintEl.textContent = t('archiveHint');
     newRuleBtn.textContent = t('newRuleBtn');
     sweepBtn.textContent = t('sweepBtn');
-    analyzeHeaderEl.textContent = t('analyzeSection');
     analyzeBtn.textContent = t('analyzeBtn');
     langSelect.title = t('langTitle');
     panel.dir = PAE_I18N.isRTL() ? 'rtl' : 'ltr';
+    applySectionState(); // section headers carry the collapse chevron + label
   }
 
   function onLanguageChange() {
@@ -1106,6 +1151,10 @@
       lastAutoFill = null;
       updateMembership();
       setStatus('');
+      // Also search this sender in Proton itself, so the actual mails are
+      // visible next to the panel. Proton reads search parameters from the
+      // URL hash (extractSearchParameters in mailboxUrl.ts upstream).
+      window.location.hash = `from=${encodeURIComponent(address)}`;
     });
     return row;
   }
